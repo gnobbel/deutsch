@@ -1,9 +1,17 @@
 [
-  { "id": 42, "field": "forms.pres3", "reason": "Morphy uses the old spelling muß; current spelling is muss" },
-  { "id": 42, "field": "forms.praet", "reason": "old spelling mußte; current spelling is musste" },
-  { "id": 52, "field": "forms.praet", "reason": "old spelling wußte; current spelling is wusste" },
-  { "id": 66, "field": "forms.pres3", "reason": "old spelling läßt; current spelling is lässt" },
-  { "id": 212, "field": "plural", "reason": "Musiken exists only as a technical plural (kinds of music); for the learner Musik has no plural" },
-  { "id": 216, "field": "strong", "reason": "our entry is schaffen = manage/redden (weak: schaffte, geschafft); the strong schaffen (schuf) means create" },
-  { "id": 233, "field": "forms.pres3", "reason": "old spelling vergißt; current spelling is vergisst" }
+  {"id":42,"de":"müssen","field":"forms.pres3","reason":"Morphy uses the old spelling muß; current spelling is muss"},
+  {"id":42,"de":"müssen","field":"forms.praet","reason":"old spelling mußte; current spelling is musste"},
+  {"id":52,"de":"wissen","field":"forms.praet","reason":"old spelling wußte; current spelling is wusste"},
+  {"id":66,"de":"lassen","field":"forms.pres3","reason":"old spelling läßt; current spelling is lässt"},
+  {"id":222,"de":"Musik","field":"plural","reason":"Musiken exists only as a technical plural (kinds of music); for the learner Musik has no plural"},
+  {"id":226,"de":"schaffen","field":"strong","reason":"our entry is schaffen = manage/redden (weak: schaffte, geschafft); the strong schaffen (schuf) means create"},
+  {"id":245,"de":"vergessen","field":"forms.pres3","reason":"old spelling vergißt; current spelling is vergisst"},
+  {"id":292,"de":"Polizei","field":"plural","reason":"Polizeien is only used for police forces as organisations; for the learner Polizei has no plural"},
+  {"id":349,"de":"verlassen","field":"forms.pres3","reason":"old spelling verläßt; current spelling is verlässt"},
+  {"id":371,"de":"schießen","field":"forms.praet","reason":"old spelling schoß; current spelling is schoss"},
+  {"id":378,"de":"schließen","field":"forms.praet","reason":"old spelling schloß; current spelling is schloss"},
+  {"id":450,"de":"hängen","field":"forms.praet","reason":"our entry is intransitive hängen (Das Bild hängt an der Wand): hing, gehangen; Morphy lists the transitive hängte"},
+  {"id":468,"de":"bewegen","field":"strong","reason":"our entry is bewegen = move (weak: bewegte, bewegt); the strong bewog/bewogen means induce"},
+  {"id":477,"de":"Zukunft","field":"plural","reason":"Zukünfte is rare and abstract; for the learner Zukunft has no plural"},
+  {"id":499,"de":"Liebe","field":"plural","reason":"Lieben means love affairs/loved ones and is rare; for the learner Liebe has no plural"}
 ]

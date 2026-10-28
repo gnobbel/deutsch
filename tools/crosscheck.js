@@ -107,9 +107,10 @@ function main() {
   const resolved = JSON.parse(readFileSync(root + 'tools/crosscheck-resolved.json', 'utf8'));
   const sources = { wikt: loadWiktionaryNouns(), morphyNouns: loadJson('german-words-dict/dist/words.json'), verbs: loadJson('german-verbs-dict/dist/verbs.json') };
   const all = words.flatMap((w) => checkWord(w, sources));
-  const isResolved = (i) => resolved.some((r) => r.id === i.id && r.field === i.field);
+  // A resolution names the word too, so a stale id can't silently resolve another word.
+  const isResolved = (i) => resolved.some((r) => r.id === i.id && r.field === i.field && (!r.de || r.de === i.de));
   const open = all.filter((i) => !isResolved(i));
-  const unused = resolved.filter((r) => !all.some((i) => i.id === r.id && i.field === r.field));
+  const unused = resolved.filter((r) => !all.some((i) => i.id === r.id && i.field === r.field && (!r.de || r.de === i.de)));
   const fmt = (i) => `#${i.id} ${i.de} — ${i.field}: ours ${JSON.stringify(i.ours)}, ${i.note} ${JSON.stringify(i.source)}`;
   const report = [
     `Crosscheck ${new Date().toISOString().slice(0, 10)}: ${words.length} words, ${words.filter((w) => w.pos === 'noun').length} nouns, ${words.filter((w) => w.pos === 'verb').length} verbs`,

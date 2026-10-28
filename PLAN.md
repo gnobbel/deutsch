@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 1 in progress. App shell, storage, backup, update flow and all word tools are done. Words 1–260 are written, validated and crosschecked; next: words 261–500, then the band review (§4.3 step 4).
+**Status:** Stage 1 in progress. App part done. Words 1–500 are written, validated and crosschecked (0 unresolved); next: band review by a fresh subagent (§4.3 step 4), stage review, then the owner installs it on his iPhone.
 
 ---
 
