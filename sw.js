@@ -1,6 +1,6 @@
 // Service worker: makes the app work offline and handles updates (PLAN §12.4).
 // Bump VERSION on every push that changes any file in PRECACHE (npm run check enforces it).
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const CACHE = `deutsch-v${VERSION}`;
 
 const PRECACHE = [
@@ -17,6 +17,7 @@ const PRECACHE = [
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/maskable-512.png',
+  'words/words-0001-0500.json',
 ];
 
 self.addEventListener('install', (event) => {

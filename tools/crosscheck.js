@@ -87,8 +87,9 @@ export function checkWord(w, { wikt, morphyNouns, verbs }) {
     const parts = v.PA2 || [];
     // Weak = regular: praet is stem + (e)te and the participle ends in -t.
     const stem = w.de.replace(/e?n$/, '');
+    const ss = (x) => x.replaceAll('ß', 'ss');
     const regular = !!praet && (praet.split(' ')[0].endsWith('te')) && parts.some((p) => p.endsWith('t'))
-      && praet.split(' ')[0].startsWith(stem.slice(w.separable ? w.separable.length : 0));
+      && ss(praet.split(' ')[0]).startsWith(ss(stem.slice(w.separable ? w.separable.length : 0)));
     if (w.strong === false && !regular) add('strong', false, `praet ${praet}, part ${parts.join('/')}`, 'Morphy');
     if (w.forms) {
       const note = (a, b) => (sameButSpelling(a, b) ? 'Morphy (old spelling?)' : 'Morphy');

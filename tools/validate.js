@@ -10,7 +10,7 @@ export const ARTICLES = ['der', 'die', 'das'];
 // Loose themes ("food", "house") don't belong here.
 export const GROUPS = [
   'weekdays', 'months', 'seasons', 'numbers', 'ordinals', 'colors', 'family', 'directions',
-  'questions', 'dayparts', 'time-units', 'modals', 'meals', 'senses',
+  'questions', 'dayparts', 'time-units', 'modals', 'meals', 'senses', 'possessives',
 ];
 const OPP = /^opp:[a-zäöüß]+-[a-zäöüß]+$/;
 

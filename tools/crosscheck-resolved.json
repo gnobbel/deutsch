@@ -1,1 +1,9 @@
-[]
+[
+  { "id": 42, "field": "forms.pres3", "reason": "Morphy uses the old spelling muß; current spelling is muss" },
+  { "id": 42, "field": "forms.praet", "reason": "old spelling mußte; current spelling is musste" },
+  { "id": 52, "field": "forms.praet", "reason": "old spelling wußte; current spelling is wusste" },
+  { "id": 66, "field": "forms.pres3", "reason": "old spelling läßt; current spelling is lässt" },
+  { "id": 212, "field": "plural", "reason": "Musiken exists only as a technical plural (kinds of music); for the learner Musik has no plural" },
+  { "id": 216, "field": "strong", "reason": "our entry is schaffen = manage/redden (weak: schaffte, geschafft); the strong schaffen (schuf) means create" },
+  { "id": 233, "field": "forms.pres3", "reason": "old spelling vergißt; current spelling is vergisst" }
+]
