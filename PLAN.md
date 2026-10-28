@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 1 in progress. App part done. Words 1–500 are written, validated and crosschecked (0 unresolved); next: band review by a fresh subagent (§4.3 step 4), stage review, then the owner installs it on his iPhone.
+**Status:** Stage 1 built and verified; waiting for the owner to install it on his iPhone (last "Done when" check). Next: Stage 2, first item.
 
 ---
 
@@ -148,7 +148,7 @@ By part of speech:
 - **Phrases:** `de` is the dictionary form (`"eine Entscheidung treffen"`); the example marks the inflected parts.
 
 ### 4.3 Generating and checking the data
-1. Generate in batches of 100–200 words in rank order.
+1. Generate in batches of 100–200 words in rank order. Afterwards run `node tools/coverage.js` and make sure every frequent lemma it lists is either added or a deliberate skip (see `tools/SOURCES.md`).
 2. `tools/validate.js` (part of `npm test`): unique ids; required fields per POS; every noun has an article and a plural / `null` / `pluralOnly`; every example has the right number of `[[…]]` markers; strong verbs have `forms`; no duplicate (de, pos, meaning); `groups` labels come from the known list; valid JSON.
 3. `tools/crosscheck.js`: compares every article and plural against a Wiktionary extract (gambolputty/german-nouns; kaikki.org is unreachable from the agent's machine) and every verb form and weak/strong flag against the Morphy verb dictionary (see `tools/SOURCES.md`). Resolve each disagreement: fix the word, or record why our value is right in `tools/crosscheck-resolved.json`. Set `check: true` on what you can't resolve. Pay attention to nouns whose article changes the meaning (der/das Teil, der/die See). `haben`/`sein` has no script source; the per-band review checks it.
 4. Once per band of 500: a **fresh subagent** that didn't generate the data reviews what scripts can't check: unnatural sentences, wrong or missing Dutch translations, missing `acceptAlso` alternatives, wrong `cognate` flags, missing `groups`. Ask it for real errors only. Fix them.
@@ -354,7 +354,7 @@ There's no in-app editor. Instead:
 - Precache the app shell, fonts, icons and all word files under a versioned cache name (`deutsch-vX.Y.Z`). **One version constant, bumped on every push that changes any file the service worker caches** (code, styles, `vendor/`, fonts, icons, manifest and every file in `words/`), also shown in Settings. Delete stale caches on activate.
 - `tools/check-version.js` (part of `npm run check`) fails when any cached file differs from `origin/main` while the version constant doesn't, and when a file in `words/` is missing from the precache list.
 - Cache-first for app files.
-- **Never reload mid-session.** A new version shows "Update beschikbaar" on Home; it applies on tap, or at the next cold start.
+- **Never reload mid-session.** A new version shows "Update beschikbaar" on Home; it applies on tap, or at the next cold start. (Stage 2: the session screen must not count as Home. `app.js` re-renders Home when an update arrives, so a session needs its own route or hidden tabs.)
 
 ### 12.5 iOS notes
 - The home-screen app has **separate storage** from Safari tabs, and deleting the icon deletes all progress. The README and first-run screen say both.
@@ -373,7 +373,7 @@ One stage per session. Start each stage by planning it against this section, the
 - [x] IndexedDB layer with migrations, snapshots, backup export/import
 - [x] Three-tab navigation (placeholder screens are fine), Settings basics, first-run install screen
 - [x] `tools/rank.js`, `tools/validate.js`, `tools/crosscheck.js`, `tools/SOURCES.md`
-- [ ] **Words 1–500**, validated, crosschecked and reviewed (§4.3)
+- [x] **Words 1–500**, validated, crosschecked and reviewed (§4.3)
 
 *Done when:* `npm run check` passes · e2e shows the app working offline at `/deutsch/` · an e2e test changes the version and confirms the update applies without losing stored data · a backup → reset → restore round trip restores identical data (test) · crosscheck report has no unresolved disagreements · the owner has installed it on his iPhone.
 
