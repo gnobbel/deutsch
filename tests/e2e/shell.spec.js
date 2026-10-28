@@ -1,4 +1,4 @@
-import { test, expect, openApp } from './fixtures.js';
+import { test, expect, openApp, waitForSetting } from './fixtures.js';
 
 test('first run explains installing, then the three tabs work', async ({ page }) => {
   await page.goto('./');
@@ -39,6 +39,9 @@ test('settings are saved and survive a reload', async ({ page }) => {
   await page.getByRole('button', { name: 'meer' }).click();
   await page.locator('#retention').selectOption('0.85');
   await page.getByLabel('Hoofdletters negeren').uncheck();
+  await waitForSetting(page, 'newPerDay', 12);
+  await waitForSetting(page, 'retention', 0.85);
+  await waitForSetting(page, 'ignoreCase', false);
   await page.reload();
   await expect(page.locator('#newPerDay')).toHaveText('12');
   await expect(page.locator('#retention')).toHaveValue('0.85');

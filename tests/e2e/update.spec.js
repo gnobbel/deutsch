@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../../tools/serve.js';
-import { test, expect, openApp, waitForServiceWorker } from './fixtures.js';
+import { test, expect, openApp, waitForServiceWorker, waitForSetting } from './fixtures.js';
 
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 const SKIP = /(^|\/)(\.git|node_modules|test-results|playwright-report|tools|tests)(\/|$)/;
@@ -32,6 +32,7 @@ test('a new version applies on tap and keeps stored data', async ({ page }) => {
   await expect(page.locator('#version')).toHaveText(oldVersion);
   await page.getByRole('button', { name: 'meer' }).click();
   await expect(page.locator('#newPerDay')).toHaveText('11');
+  await waitForSetting(page, 'newPerDay', 11);
 
   // Publish a new version, the way a push to main does.
   writeFileSync(swPath, readFileSync(swPath, 'utf8').replace(`'${oldVersion}'`, "'99.0.0'"));

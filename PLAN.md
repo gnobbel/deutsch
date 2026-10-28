@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 1 not started. Next step: Stage 1, first item.
+**Status:** Stage 1 in progress. App shell, storage, backup, update flow and the validator are done; next: `tools/rank.js`, `tools/crosscheck.js`, `tools/SOURCES.md`, then words 1–500.
 
 ---
 
@@ -367,11 +367,11 @@ There's no in-app editor. Instead:
 One stage per session. Start each stage by planning it against this section, then build, verify and report. Tick items as they're done. A stage is done only when every "Done when" check passes and the evidence is in the report.
 
 ### Stage 1 — Foundation
-- [ ] Repo bootstrap: this file as `PLAN.md`, `CLAUDE.md`, README (one paragraph + iPhone install steps), `.gitignore` (incl. `tools/sources/`, `node_modules/`)
-- [ ] `package.json` with the commands from §3; Playwright as a dev dependency
-- [ ] PWA shell, manifest, icons, self-hosted font, service worker with the update flow
-- [ ] IndexedDB layer with migrations, snapshots, backup export/import
-- [ ] Three-tab navigation (placeholder screens are fine), Settings basics, first-run install screen
+- [x] Repo bootstrap: this file as `PLAN.md`, `CLAUDE.md`, README (one paragraph + iPhone install steps), `.gitignore` (incl. `tools/sources/`, `node_modules/`)
+- [x] `package.json` with the commands from §3; Playwright as a dev dependency
+- [x] PWA shell, manifest, icons, self-hosted font, service worker with the update flow
+- [x] IndexedDB layer with migrations, snapshots, backup export/import
+- [x] Three-tab navigation (placeholder screens are fine), Settings basics, first-run install screen
 - [ ] `tools/rank.js`, `tools/validate.js`, `tools/crosscheck.js`, `tools/SOURCES.md`
 - [ ] **Words 1–500**, validated, crosschecked and reviewed (§4.3)
 

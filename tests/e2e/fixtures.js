@@ -28,3 +28,14 @@ export async function waitForServiceWorker(page) {
     }
   });
 }
+
+// Waits until a setting has been written to IndexedDB (saves are asynchronous).
+export async function waitForSetting(page, key, value) {
+  await page.waitForFunction(([k, v]) => new Promise((resolve) => {
+    const r = indexedDB.open('deutsch');
+    r.onsuccess = () => {
+      const g = r.result.transaction('settings').objectStore('settings').get(k);
+      g.onsuccess = () => { r.result.close(); resolve(g.result?.value === v); };
+    };
+  }), [key, value]);
+}

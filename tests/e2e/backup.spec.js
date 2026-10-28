@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { test, expect, openApp } from './fixtures.js';
+import { test, expect, openApp, waitForSetting } from './fixtures.js';
 
 test('backup → alles wissen → terugzetten brings everything back', async ({ page }) => {
   await openApp(page);
@@ -7,6 +7,8 @@ test('backup → alles wissen → terugzetten brings everything back', async ({ 
   await expect(page.locator('#lastBackup')).toContainText('nog nooit');
   await page.getByRole('button', { name: 'minder' }).click();
   await page.getByLabel('Hoofdletters negeren').uncheck();
+  await waitForSetting(page, 'newPerDay', 9);
+  await waitForSetting(page, 'ignoreCase', false);
 
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Backup maken' }).click()]);
   expect(download.suggestedFilename()).toMatch(/^deutsch-backup-\d{4}-\d\d-\d\d\.json$/);
