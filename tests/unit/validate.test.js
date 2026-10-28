@@ -86,3 +86,18 @@ test('reflexive verbs are written without sich', () => {
   delete v.forms;
   assert.match(errs([v]), /without "sich"/);
 });
+
+test('noun alternatives must include their article', () => {
+  const w = { ...handy(), acceptAlso: ['Mobiltelefon'] };
+  assert.match(errs([w]), /acceptAlso "Mobiltelefon" needs its article/);
+  w.acceptAlso = ['das Mobiltelefon'];
+  assert.deepEqual(validateWords([w]), []);
+});
+
+test('the same word in two band files is caught', () => {
+  const seenIds = new Set();
+  const seenKeys = new Set();
+  assert.deepEqual(validateWords([handy()], { seenIds, seenKeys }), []);
+  const again = { ...handy(), id: 600, rank: 600, level: 'A2' };
+  assert.match(validateWords([again], { seenIds, seenKeys }).join(), /duplicate \(de, pos, meaning\)/);
+});

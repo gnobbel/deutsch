@@ -1,9 +1,11 @@
 // e2e runs at iPhone size, in WebKit when it is installed, otherwise Chromium.
 import { defineConfig, devices } from '@playwright/test';
-import { existsSync, readdirSync } from 'node:fs';
+import { webkit } from 'playwright';
+import { existsSync } from 'node:fs';
 
-const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
-const hasWebkit = !!browsersDir && existsSync(browsersDir) && readdirSync(browsersDir).some((d) => d.startsWith('webkit'));
+const hasWebkit = (() => {
+  try { return existsSync(webkit.executablePath()); } catch { return false; }
+})();
 const { defaultBrowserType, ...iphone } = devices['iPhone 13'];
 
 export default defineConfig({

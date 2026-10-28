@@ -108,10 +108,27 @@ function openRaw(name) {
         for (const ix of def.indexes || []) if (!os.indexNames.contains(ix)) os.createIndex(ix, ix);
       }
     };
-    r.onsuccess = () => resolve(r.result);
+    r.onsuccess = () => {
+      // Let a newer version of the app (another tab) upgrade the database.
+      r.result.onversionchange = () => r.result.close();
+      resolve(r.result);
+    };
     r.onerror = () => reject(r.error);
-    r.onblocked = () => reject(new Error('database blocked'));
+    // "blocked" is not an error: the open continues once older connections close.
   });
+}
+
+// Key field of each data store; a row without it can't be stored.
+const KEYS = { cards: 'id', words: 'wordId', settings: 'key', meta: 'key' };
+
+// Throws when a row can't be stored, so a bad file or migration never gets half-way.
+export function checkRows(dump) {
+  for (const s of DATA_STORES) {
+    for (const row of dump[s] || []) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error(`${s}: rij is geen object`);
+      if (KEYS[s] && (row[KEYS[s]] === undefined || row[KEYS[s]] === null)) throw new Error(`${s}: rij zonder ${KEYS[s]}`);
+    }
+  }
 }
 
 // ---------- The database ----------
@@ -167,15 +184,24 @@ export class Db {
     return out;
   }
 
-  // Replaces all data stores with the dump, in one transaction.
+  // Replaces all data stores with the dump, in one transaction: all or nothing.
   async replaceAll(dump) {
+    checkRows(dump);
     const tx = this.idb.transaction(DATA_STORES, 'readwrite');
-    for (const s of DATA_STORES) {
-      const os = tx.objectStore(s);
-      os.clear();
-      for (const row of dump[s] || []) os.put(row);
+    const finished = done(tx);
+    try {
+      for (const s of DATA_STORES) {
+        const os = tx.objectStore(s);
+        os.clear();
+        for (const row of dump[s] || []) os.put(row);
+      }
+    } catch (e) {
+      // A failing put() doesn't abort the transaction by itself; the clears would commit.
+      tx.abort();
+      await finished.catch(() => {});
+      throw e;
     }
-    await done(tx);
+    await finished;
   }
 
   async snapshot(reason, now = new Date()) {
@@ -244,7 +270,14 @@ export class Db {
     for (const s of DATA_STORES) {
       if (file.data[s] !== undefined && !Array.isArray(file.data[s])) throw new Error('Dit backupbestand is beschadigd.');
     }
-    const data = migrate(file.data, v, this.migrations, this.schemaVersion);
+    let data;
+    try {
+      data = migrate(file.data, v, this.migrations, this.schemaVersion);
+      for (const s of DATA_STORES) data[s] ??= [];
+      checkRows(data);
+    } catch {
+      throw new Error('Dit backupbestand is beschadigd.');
+    }
     setMetaRow(data, 'schemaVersion', this.schemaVersion);
     const summary = {
       exportedAt: file.exportedAt instanceof Date ? file.exportedAt : null,

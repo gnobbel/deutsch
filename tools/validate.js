@@ -31,10 +31,10 @@ export function markers(sentence) {
 }
 
 // Validates one file's entries. `range` is [first, last] rank for the file, or null.
-export function validateWords(entries, { range = null, seenIds = new Set() } = {}) {
+export function validateWords(entries, { range = null, seenIds = new Set(), seenKeys = new Set() } = {}) {
   const errors = [];
   if (!Array.isArray(entries)) return ['file is not a JSON array'];
-  const keys = new Set();
+  const keys = seenKeys;
   const ranks = new Set();
   for (const w of entries) {
     const at = `#${w?.id} ${w?.de ?? '?'}`;
@@ -93,6 +93,8 @@ export function validateWords(entries, { range = null, seenIds = new Set() } = {
         if (!isStr(w.genitive) || !w.genitive.startsWith('des ')) err('nDecl noun needs genitive "des …"');
       }
       if (isStr(w.de) && w.de[0] !== w.de[0].toUpperCase()) err('noun must be capitalised');
+      // Noun answers are typed with their article, so noun alternatives carry one too.
+      for (const a of w.acceptAlso || []) if (/^[A-ZÄÖÜ]/.test(a)) err(`acceptAlso "${a}" needs its article`);
     } else if (w.article !== undefined || w.plural !== undefined) err('only nouns have article/plural');
 
     if (w.pos === 'verb') {
@@ -127,6 +129,7 @@ function main() {
     return;
   }
   const seenIds = new Set();
+  const seenKeys = new Set();
   let total = 0;
   let checks = 0;
   let failed = false;
@@ -137,7 +140,7 @@ function main() {
     try { entries = JSON.parse(readFileSync(join(dir, f), 'utf8')); } catch (e) {
       console.error(`✗ ${f}: invalid JSON (${e.message})`); failed = true; continue;
     }
-    const errors = validateWords(entries, { range: [Number(m[1]), Number(m[2])], seenIds });
+    const errors = validateWords(entries, { range: [Number(m[1]), Number(m[2])], seenIds, seenKeys });
     for (const e of errors) console.error(`✗ ${f} ${e}`);
     failed ||= errors.length > 0;
     total += entries.length;

@@ -10,17 +10,26 @@ const repo = fileURLToPath(new URL('../..', import.meta.url));
 const SKIP = /(^|\/)(\.git|node_modules|test-results|playwright-report|tools|tests)(\/|$)/;
 let dir, server, base;
 
-test.beforeAll(async () => {
+// Each test gets its own copy of the app, as if freshly deployed.
+test.beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'deutsch-update-'));
   cpSync(repo, dir, { recursive: true, filter: (src) => !SKIP.test(src.slice(repo.length)) });
   server = await startServer({ root: dir, port: 0, quiet: true });
   base = `http://localhost:${server.address().port}/deutsch/`;
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   server?.close();
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
+
+// Publishes a new version in the served copy, the way a push to main does.
+function publish(version) {
+  const swPath = join(dir, 'sw.js');
+  const old = readFileSync(swPath, 'utf8').match(/const VERSION = '([^']+)'/)[1];
+  writeFileSync(swPath, readFileSync(swPath, 'utf8').replace(`'${old}'`, `'${version}'`));
+  writeFileSync(join(dir, 'strings.nl.js'), readFileSync(join(dir, 'strings.nl.js'), 'utf8').replace("title: 'Woorden'", "title: 'Woorden (nieuw)'"));
+}
 
 test('a new version applies on tap and keeps stored data', async ({ page }) => {
   const swPath = join(dir, 'sw.js');
@@ -34,9 +43,7 @@ test('a new version applies on tap and keeps stored data', async ({ page }) => {
   await expect(page.locator('#newPerDay')).toHaveText('11');
   await waitForSetting(page, 'newPerDay', 11);
 
-  // Publish a new version, the way a push to main does.
-  writeFileSync(swPath, readFileSync(swPath, 'utf8').replace(`'${oldVersion}'`, "'99.0.0'"));
-  writeFileSync(join(dir, 'strings.nl.js'), readFileSync(join(dir, 'strings.nl.js'), 'utf8').replace("title: 'Woorden'", "title: 'Woorden (nieuw)'"));
+  publish('99.0.0');
   await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
   await page.waitForFunction(async () => !!(await navigator.serviceWorker.getRegistration()).waiting);
 
@@ -57,4 +64,29 @@ test('a new version applies on tap and keeps stored data', async ({ page }) => {
   await page.getByRole('link', { name: 'Woorden' }).click();
   await expect(page.getByRole('heading', { name: 'Woorden (nieuw)' })).toBeVisible();
   expect(await page.evaluate(() => caches.keys())).toEqual(['deutsch-v99.0.0']);
+});
+
+test('a waiting update applies at the next cold start, without a tap', async ({ context }) => {
+  let page = await context.newPage();
+  await openApp(page, base);
+  await waitForServiceWorker(page);
+  await page.getByRole('link', { name: 'Instellingen' }).click();
+  await page.getByRole('button', { name: 'meer' }).click();
+  await waitForSetting(page, 'newPerDay', 11);
+
+  publish('99.0.1');
+  await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
+  await page.waitForFunction(async () => !!(await navigator.serviceWorker.getRegistration()).waiting);
+
+  // Close the app completely, then open it again. The browser activates the waiting version
+  // once the last window is gone; on a phone, reopening the app takes longer than this pause.
+  await page.close();
+  await new Promise((r) => setTimeout(r, 1500));
+  page = await context.newPage();
+  await page.goto(base + '#instellingen');
+  await expect(page.locator('#version')).toHaveText('99.0.1');
+  await expect(page.locator('#newPerDay')).toHaveText('11');
+  await page.getByRole('link', { name: 'Leren' }).click();
+  await expect(page.getByRole('button', { name: /Update beschikbaar/ })).toHaveCount(0);
+  expect(await page.evaluate(() => caches.keys())).toEqual(['deutsch-v99.0.1']);
 });

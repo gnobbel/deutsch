@@ -178,7 +178,7 @@ async function renderSettings() {
     ),
     h('h2', {}, T.data),
     h('p', { class: 'small muted', id: 'lastBackup' }, `${T.lastBackup}: ${lastBackup ? formatDate(lastBackup) : T.never}`),
-    h('button', { id: 'backup', onclick: onBackup }, T.backup),
+    h('button', { id: 'backup', onclick: () => onBackup().catch((e) => toast(S.error(e.message))) }, T.backup),
     h('p', { class: 'small muted' }, T.backupHint),
     h('button', { id: 'restore', onclick: () => fileInput.click() }, T.restore),
     fileInput,
@@ -259,7 +259,11 @@ async function onRestoreFile(e) {
     ok: T.restoreOk,
   });
   if (!ok) return;
-  await db.restoreBackup(parsed);
+  try {
+    await db.restoreBackup(parsed);
+  } catch (err) {
+    return toast(S.error(err.message));
+  }
   toast(T.restored);
   route();
 }

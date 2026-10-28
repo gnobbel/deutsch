@@ -154,3 +154,28 @@ test('a missing migration step is an error, not silent data loss', () => {
 test('MIGRATIONS covers every schema version up to the current one', () => {
   for (let v = 2; v <= SCHEMA_VERSION; v++) assert.ok(MIGRATIONS.find((m) => m.to === v), `migration to ${v}`);
 });
+
+test('a damaged backup is refused before anything is touched', async () => {
+  const db = await openDb({ name: freshName() });
+  await fill(db);
+  const before = await db.dump();
+  const bad = (data) => JSON.stringify({ app: 'deutsch', schemaVersion: 1, data });
+  assert.throws(() => db.parseBackup(bad({ meta: [{ value: 1 }] })), /beschadigd/);
+  assert.throws(() => db.parseBackup(bad({ cards: [{ wordId: 1 }] })), /beschadigd/);
+  assert.throws(() => db.parseBackup(bad({ words: ['x'] })), /beschadigd/);
+  // A backup that leaves out stores is fine; they count as empty.
+  assert.equal(db.parseBackup(bad({ settings: [] })).summary.words, 0);
+  assert.deepEqual(await db.dump(), before);
+  db.close();
+});
+
+test('if writing fails half-way, nothing is lost (all or nothing)', async () => {
+  const db = await openDb({ name: freshName() });
+  await fill(db);
+  const before = await db.dump();
+  // An object is not a valid key: the row check lets it through, put() throws mid-transaction.
+  const bad = { ...before, cards: [{ id: {}, wordId: 1 }, ...before.cards] };
+  await assert.rejects(() => db.replaceAll(bad));
+  assert.deepEqual(await db.dump(), before);
+  db.close();
+});
