@@ -29,7 +29,7 @@ function h(tag, attrs = {}, ...children) {
 }
 
 function show(...children) {
-  view.replaceChildren(...children);
+  view.replaceChildren(...children.flat().filter((c) => c != null && c !== false));
   window.scrollTo(0, 0);
 }
 

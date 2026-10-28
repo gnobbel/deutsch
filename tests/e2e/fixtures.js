@@ -8,6 +8,11 @@ export const test = base.extend({
     page.on('pageerror', (e) => errors.push(e.message));
     await use(page);
     expect(errors, 'console errors').toEqual([]);
+    // Leftover "null"/"undefined" text means a screen rendered a missing value.
+    if (!page.isClosed() && page.url().startsWith('http')) {
+      const text = await page.locator('body').innerText().catch(() => '');
+      expect(text, 'stray null/undefined on screen').not.toMatch(/\b(null|undefined|NaN)\b/);
+    }
   },
 });
 export { expect };

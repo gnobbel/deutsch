@@ -8,6 +8,7 @@ test('first run explains installing, then the three tabs work', async ({ page })
   await page.getByRole('button', { name: 'Toch doorgaan in de browser' }).click();
 
   await expect(page.getByRole('heading', { name: 'Leren' })).toBeVisible();
+  await expect(page.locator('#view')).not.toContainText('null');
   await page.screenshot({ path: 'test-results/screens/leren.png' });
   await page.getByRole('link', { name: 'Woorden' }).click();
   await expect(page.getByRole('heading', { name: 'Woorden' })).toBeVisible();
