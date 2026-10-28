@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 1 in progress. App shell, storage, backup, update flow and the validator are done; next: `tools/rank.js`, `tools/crosscheck.js`, `tools/SOURCES.md`, then words 1–500.
+**Status:** Stage 1 in progress. App shell, storage, backup, update flow and all word tools are done; next: words 1–500 (§4.3).
 
 ---
 
@@ -110,8 +110,8 @@ tools/sources/    – downloaded third-party files; gitignored
 
 ### 4.1 Scope and sources
 - **Launch with ~2,000 words** (≈ B1), built in bands of 500 across the stages (§13); at 10 a day that lasts over six months. Later, if the owner asks, add bands of 500 toward ~5,000 (B2/C1), **ahead of use**, so there are always at least ~300 words he hasn't seen yet. Home shows how many new words are left, so the owner can say when it's getting low.
-- **Order comes from a frequency list, computed by script** (`tools/rank.js`), never estimated from memory. Prefer a list that is already **lemmatised** (ranked by base form), such as the DeReWo base-form list, so *ist/war/bin* don't count separately. SUBTLEX-DE is the fallback; then merge inflected forms into lemmas in the script. Record the source's name, version and download date in `tools/SOURCES.md`. If you can't download the file yourself (no network access, license click-through), ask the owner to download it once and tell him exactly where to put it.
-- `level` (A1/A2/B1…) comes from the Goethe lists if they're available locally, otherwise from the rank band.
+- **Order comes from a frequency list, computed by script** (`tools/rank.js`), never estimated from memory. **Decided (Stage 1):** DeReWo can't be fetched from the agent's machine, so the order comes from the OpenSubtitles 2018 frequency list, with inflected forms merged into base forms by `rank.js` using the LanguageTool/Morphy morphology dictionaries, so *ist/war/bin* count toward *sein*. Sources, versions and download dates are in `tools/SOURCES.md`; `node tools/fetch-sources.js` downloads them.
+- `level` (A1/A2/B1…) comes from the Goethe lists if they're available locally, otherwise from the rank band (1–500 A1, 501–1000 A2, 1001–2000 B1, 2001–3500 B2, then C1; enforced by the validator).
 - **Licensing:** commit only our own compiled data (rank number, translations, sentences). Raw third-party files stay in `tools/sources/`, which is gitignored.
 - **Function words with a clean Dutch equivalent** (maar → aber, omdat → weil, zonder → ohne) get normal cards.
 - **Slippery function words** (doch, mal, ja as a particle, es, sich, pronouns, articles, *sein* as an auxiliary…) get `"clozeOnly": true`. They're skipped until cloze cards exist (Stage 4).
@@ -150,7 +150,7 @@ By part of speech:
 ### 4.3 Generating and checking the data
 1. Generate in batches of 100–200 words in rank order.
 2. `tools/validate.js` (part of `npm test`): unique ids; required fields per POS; every noun has an article and a plural / `null` / `pluralOnly`; every example has the right number of `[[…]]` markers; strong verbs have `forms`; no duplicate (de, pos, meaning); `groups` labels come from the known list; valid JSON.
-3. `tools/crosscheck.js`: compares every article, plural and verb form against a Wiktionary extract (e.g. the kaikki.org German dataset, kept in `tools/sources/`). Resolve each disagreement; set `check: true` on what you can't resolve. Pay attention to nouns whose article changes the meaning (der/das Teil, der/die See).
+3. `tools/crosscheck.js`: compares every article and plural against a Wiktionary extract (gambolputty/german-nouns; kaikki.org is unreachable from the agent's machine) and every verb form and weak/strong flag against the Morphy verb dictionary (see `tools/SOURCES.md`). Resolve each disagreement: fix the word, or record why our value is right in `tools/crosscheck-resolved.json`. Set `check: true` on what you can't resolve. Pay attention to nouns whose article changes the meaning (der/das Teil, der/die See). `haben`/`sein` has no script source; the per-band review checks it.
 4. Once per band of 500: a **fresh subagent** that didn't generate the data reviews what scripts can't check: unnatural sentences, wrong or missing Dutch translations, missing `acceptAlso` alternatives, wrong `cognate` flags, missing `groups`. Ask it for real errors only. Fix them.
 
 Word files are split by band, loaded lazily and all cached by the service worker. Corrections the owner reports (§11.2) are fixed directly in these files. Every change to a word file needs a version bump (§12.4), or the phone keeps the old file.
@@ -372,7 +372,7 @@ One stage per session. Start each stage by planning it against this section, the
 - [x] PWA shell, manifest, icons, self-hosted font, service worker with the update flow
 - [x] IndexedDB layer with migrations, snapshots, backup export/import
 - [x] Three-tab navigation (placeholder screens are fine), Settings basics, first-run install screen
-- [ ] `tools/rank.js`, `tools/validate.js`, `tools/crosscheck.js`, `tools/SOURCES.md`
+- [x] `tools/rank.js`, `tools/validate.js`, `tools/crosscheck.js`, `tools/SOURCES.md`
 - [ ] **Words 1–500**, validated, crosschecked and reviewed (§4.3)
 
 *Done when:* `npm run check` passes · e2e shows the app working offline at `/deutsch/` · an e2e test changes the version and confirms the update applies without losing stored data · a backup → reset → restore round trip restores identical data (test) · crosscheck report has no unresolved disagreements · the owner has installed it on his iPhone.

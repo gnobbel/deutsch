@@ -1,0 +1,15 @@
+# Data sources
+
+Raw third-party files live in `tools/sources/` (gitignored). `node tools/fetch-sources.js` downloads them all. The repo holds only our own compiled data: rank numbers, translations, sentences and flags.
+
+| Used for | Source | Version | License | Downloaded |
+|---|---|---|---|---|
+| Frequency order (`tools/rank.js`) | [hermitdave/FrequencyWords](https://github.com/hermitdave/FrequencyWords), `content/2018/de/de_50k.txt`, i.e. word counts from OpenSubtitles 2018, inflected and lowercased | 2018 list, `master` | CC BY-SA 4.0 (content) | 2026-10-28 |
+| Lemmatising forms for the ranking; noun fallback and verb forms in `tools/crosscheck.js` | [german-words-dict](https://www.npmjs.com/package/german-words-dict), [german-verbs-dict](https://www.npmjs.com/package/german-verbs-dict) and [german-adjectives-dict](https://www.npmjs.com/package/german-adjectives-dict), built from LanguageTool's german-pos-dict (Morphy, extended by korrekturen.de) | 3.4.0 | CC BY-SA 4.0 (data) | 2026-10-28 |
+| Articles and plurals in `tools/crosscheck.js` | [gambolputty/german-nouns](https://github.com/gambolputty/german-nouns) `nouns.csv`, extracted from German Wiktionary | `main` | CC BY-SA 4.0 | 2026-10-28 |
+
+## Why these and not the ones in PLAN §4.1
+- **DeReWo** (the preferred base-form frequency list from the IDS Mannheim) and **kaikki.org** (the Wiktionary extract) can't be reached from the cloud machine the agent works on, and DeReWo's license doesn't allow putting it in this public repo. The owner agreed (2026-10-28) to use the subtitle list instead. Subtitles track everyday spoken German, which suits the goal.
+- The subtitle list has inflected forms (*ist, war, bin*). `rank.js` merges them into base forms using the morphology dictionaries above. A form that could belong to several base forms is shared out by how often each base form itself occurs. The result is guidance: the agent picks entries in that order, but skips names, interjections, English words and dictionary noise (e.g. *Habe* from *habe*), and places fixed phrases next to their key word.
+- **Levels:** no Goethe lists are available locally, so `level` comes from the rank band (1–500 A1, 501–1000 A2, 1001–2000 B1, 2001–3500 B2, then C1). See `levelForRank` in `tools/validate.js`.
+- **Verbs:** the verb dictionary has no haben/sein auxiliary, so `forms.aux` is checked in the per-band review instead of by script. The dictionary uses the old spelling (*muß*). A ß/ss-only difference is reported as "old spelling?" and then resolved by hand in `tools/crosscheck-resolved.json`.
