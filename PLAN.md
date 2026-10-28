@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 1 built and verified; waiting for the owner to install it on his iPhone (last "Done when" check). Next: Stage 2, first item.
+**Status:** Stage 1 built and verified (v0.1.5; words 1–500 had two independent band reviews); waiting for the owner to install it on his iPhone (last "Done when" check). Next: Stage 2, first item.
 
 ---
 
