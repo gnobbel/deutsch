@@ -45,7 +45,9 @@ export function pickNewWord(words, wordStates, cards, now) {
 // ---------- today's plan, shared by Home and the session (§8.2) ----------
 
 export function planToday({ words, wordStates, cards, settings, seconds, now }) {
-  const all = [...cards.values()];
+  // A word removed from the data keeps its progress, hidden (§12.3): its cards are left out.
+  const known = new Set(words.map((w) => w.id));
+  const all = [...cards.values()].filter((c) => known.has(c.wordId));
   const typeRank = (c) => CARD_TYPES.indexOf(c.type);
   const due = all.filter((c) => isDue(c, now))
     .map((c) => ({ c, r: retrievability(c, now, settings.retention) }))

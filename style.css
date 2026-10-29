@@ -178,8 +178,12 @@ button.icon + button.icon { margin-top: 0; }
   border: 2px solid var(--line); border-radius: 16px; background: var(--surface);
   padding: 16px 18px 14px; margin-bottom: 16px;
 }
-.card .label { font-size: 14px; color: var(--muted); min-height: 1.45em; margin: 0 0 6px; }
-.card.revealed .label { color: var(--fg); font-weight: 700; font-size: 15px; }
+/* One line, same size in every state, so the word below never moves (§10.1). */
+.card .label {
+  font-size: 15px; color: var(--muted); height: 1.45em; margin: 0 0 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card.revealed .label { color: var(--fg); font-weight: 700; }
 /* The context sentence has a fixed height and sits on the word, so the word is always in the
    same place (§10.1). */
 .card .context {

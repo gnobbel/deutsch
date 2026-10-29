@@ -41,7 +41,8 @@ export function lockup(word) {
     } else {
       parts.push(word.de);
     }
-    if (word.governs) parts.push(' ', h('span', { class: 'form' }, `+ ${word.governs.replace(/^\+\s*/, '')}`));
+    // A bare case gets a plus (helfen + Dat.); a preposition follows the verb (warten auf + Akk.).
+    if (word.governs) parts.push(' ', h('span', { class: 'form' }, /^(Nom|Akk|Dat|Gen)\./.test(word.governs) ? `+ ${word.governs}` : word.governs));
     if (word.forms) {
       parts.push(sep(), h('span', { class: 'form' }, `er ${word.forms.pres3}`));
       parts.push(sep(), h('span', { class: 'form' }, `${word.forms.aux === 'sein' ? 'ist' : 'hat'} ${word.forms.part}`));

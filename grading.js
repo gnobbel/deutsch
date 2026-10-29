@@ -53,11 +53,18 @@ export function displayForm(word) {
   return word.de;
 }
 
-// Every answer that counts as the word itself (reflexive verbs with or without "sich", §7.3).
+// The prepositions in a `governs` pattern: "über/auf + Akk." → über, auf; "Dat. / zu" → zu.
+export function prepositions(governs) {
+  if (!governs) return [];
+  return governs.split('/').map((p) => p.replace(/\+?\s*(Nom|Akk|Dat|Gen)\.?/g, '').trim()).filter((p) => /^\p{L}+$/u.test(p));
+}
+
+// Every answer that counts as the word itself (§7.3): reflexive verbs with or without "sich";
+// for verbs with a preposition only the verb is required, but the preposition may be added.
 export function answerForms(word) {
   if (word.pos === 'noun') return [`${word.article} ${word.de}`];
-  if (word.reflexive) return [word.de, `sich ${word.de}`];
-  return [word.de];
+  const forms = word.reflexive ? [word.de, `sich ${word.de}`] : [word.de];
+  return [...forms, ...prepositions(word.governs).flatMap((p) => forms.map((f) => `${f} ${p}`))];
 }
 
 // Lookups over the whole dataset: which words share a Dutch prompt, and which German strings

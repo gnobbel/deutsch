@@ -178,6 +178,14 @@ test('almost on a review is Hard; a different valid word gets no grade and shows
   assert.deepEqual(store.log.map((r) => r.grade), [null, Grade.Hard]);
 });
 
+test('a card whose word was removed from the data stays stored but hidden (§12.3)', () => {
+  const orphan = { ...reviewCard(1, 10), id: '99999:production', wordId: 99999 };
+  const { s } = session({ cards: [orphan, reviewCard(2, 10)], settings: { newPerDay: 0 } });
+  assert.equal(s.next().word.id, 2);
+  s.answerTyped(s.current, 'klein', 1000);
+  assert.equal(s.next(), null);
+});
+
 test('an unfinished word continues at the start of the next session', async () => {
   const card = { ...newCard(2, 'production', new Date('2026-10-28T10:00:00+01:00')), step: 'type2' };
   const ws = { wordId: 2, introducedOn: new Date('2026-10-28T10:00:00+01:00'), tooEasy: false, accepted: [] };

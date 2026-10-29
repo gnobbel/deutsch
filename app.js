@@ -202,10 +202,21 @@ async function endSession() {
   route();
 }
 
-function say(word) {
-  if (sessionSettings.audio) speak(spoken(word), { voice: sessionSettings.audioVoice, rate: sessionSettings.audioRate });
+let spokenWordId = null;
+function speakWord(word) {
+  spokenWordId = word.id;
+  speak(spoken(word), { voice: sessionSettings.audioVoice, rate: sessionSettings.audioRate });
 }
-const sayNow = (word) => () => speak(spoken(word), { voice: sessionSettings.audioVoice, rate: sessionSettings.audioRate });
+function say(word) {
+  if (sessionSettings.audio) speakWord(word);
+}
+const sayNow = (word) => () => speakWord(word);
+// Audio is never on the prompt side (§10.6): a word still being spoken stops when its own
+// prompt comes up (another word's audio gives nothing away and may finish).
+function quietFor(word) {
+  if (spokenWordId === word.id) stopSpeech();
+  spokenWordId = null;
+}
 
 function sessionHeader() {
   const T = S.session;
@@ -264,11 +275,11 @@ function renderIntro(screen, { again = false } = {}) {
   show(
     sessionHeader(),
     card({
-      label: again ? T.mcWrong : T.newWord,
+      label: again ? T.wrong : T.newWord,
       context: germanSentence(word),
       word: lockup(word),
       revealed: word,
-      extra: wordDetails(word),
+      extra: [again && h('p', { class: 'message', role: 'status' }, T.mcWrong), ...wordDetails(word)],
     }),
     h('div', { class: 'bottom' },
       h('button', { class: 'primary', id: 'next', onclick: go }, T.next),
@@ -288,6 +299,7 @@ function renderIntro(screen, { again = false } = {}) {
 function renderChoice(screen) {
   const T = S.session;
   const { word } = screen;
+  quietFor(word);
   show(
     sessionHeader(),
     card({ label: T.chooseLabel, context: dutchSentence(word), word: promptWord(word) }),
@@ -313,6 +325,7 @@ function renderChoice(screen) {
 function renderTyping(screen, { message = null } = {}) {
   const T = S.session;
   const { word } = screen;
+  quietFor(word);
   const input = answerInput();
   const form = h('form', { class: 'answer', onsubmit: (e) => {
     e.preventDefault();
@@ -345,7 +358,7 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
   const T = S.session;
   const { word } = screen;
   const ok = r.outcome === 'correct' || overridden;
-  const head = overridden ? T.overridden(overridden)
+  const head = overridden ? T.correct
     : r.outcome === 'correct' ? (r.graduated ? T.graduated : T.correct)
       : r.outcome === 'almost' ? T.almost
         : r.reason === 'article' ? T.wrongArticle
@@ -381,6 +394,7 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
       word: lockup(word),
       revealed: word,
       extra: [
+        overridden && h('p', { class: 'message', id: 'overridden', role: 'status' }, T.overridden(overridden)),
         shownAnswer,
         r.note && !overridden && h('p', { class: 'note-line' }, T.spelling(r.note)),
         ...wordDetails(word),
@@ -678,6 +692,10 @@ async function main() {
     return;
   }
   window.addEventListener('hashchange', route);
+  // iOS keeps the home-screen app in memory: refresh Home's numbers when it comes back.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !session && currentTab() === 'leren' && !tabs.hidden) renderHome();
+  });
   await route();
   setupServiceWorker().catch((e) => console.warn('service worker:', e));
 }

@@ -14,7 +14,7 @@ const words = [
   W({ id: 7, pos: 'adv', de: 'schon', nl: ['al'] }),
   W({ id: 8, pos: 'verb', de: 'bekommen', nl: ['krijgen'], acceptAlso: ['kriegen', 'erhalten'], strong: true,
     forms: { pres3: 'bekommt', praet: 'bekam', part: 'bekommen', aux: 'haben' } }),
-  W({ id: 9, pos: 'verb', de: 'freuen', reflexive: true, governs: 'auf + Akk.', nl: ['zich verheugen'] }),
+  W({ id: 9, pos: 'verb', de: 'freuen', reflexive: true, governs: 'über/auf + Akk.', nl: ['zich verheugen'] }),
   W({ id: 10, pos: 'noun', de: 'Straße', article: 'die', plural: 'Straßen', nl: ['straat'] }),
   W({ id: 11, pos: 'adj', de: 'müde', nl: ['moe'] }),
   W({ id: 12, pos: 'noun', de: 'Wasser', article: 'das', plural: null, nl: ['water'] }),
@@ -25,6 +25,8 @@ const words = [
   W({ id: 17, pos: 'verb', de: 'fahren', nl: ['rijden'], strong: true, forms: { pres3: 'fährt', praet: 'fuhr', part: 'gefahren', aux: 'sein' } }),
   W({ id: 18, pos: 'adj', de: 'hübsch', nl: ['mooi', 'knap'] }),
   W({ id: 19, pos: 'phrase', de: 'eine Entscheidung treffen', nl: ['een beslissing nemen'] }),
+  W({ id: 21, pos: 'verb', de: 'warten', governs: 'auf + Akk.', nl: ['wachten'] }),
+  W({ id: 22, pos: 'verb', de: 'gehören', governs: 'Dat. / zu', nl: ['horen bij'] }),
   W({ id: 20, pos: 'verb', de: 'anfangen', separable: 'an', nl: ['beginnen'], strong: true,
     forms: { pres3: 'fängt an', praet: 'fing an', part: 'angefangen', aux: 'haben' } }),
 ];
@@ -46,6 +48,15 @@ test('correct answers (§7.6)', () => {
   assert.equal(outcome('sich freuen', 'freuen'), 'correct');
   assert.equal(outcome('anfangen', 'anfangen'), 'correct');
   assert.equal(outcome('eine Entscheidung treffen', 'eine Entscheidung treffen'), 'correct');
+});
+
+test('verbs with a preposition: only the verb is required, the preposition may be added (§7.3)', () => {
+  assert.equal(outcome('warten', 'warten'), 'correct');
+  assert.equal(outcome('warten auf', 'warten'), 'correct');
+  assert.equal(outcome('freuen über', 'freuen'), 'correct');
+  assert.equal(outcome('sich freuen auf', 'freuen'), 'correct');
+  assert.equal(outcome('gehören zu', 'gehören'), 'correct');
+  assert.equal(outcome('warten für', 'warten'), 'wrong');
 });
 
 test('umlaut shortcuts count, with a note showing the proper spelling', () => {
