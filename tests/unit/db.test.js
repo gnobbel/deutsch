@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import {
   openDb, migrate, clearProgress, toJSONWithDates, parseJSONWithDates, MIGRATIONS, SCHEMA_VERSION, DEFAULT_SETTINGS,
 } from '../../db.js';
+import { Session, planToday } from '../../session.js';
+import { DEFAULT_SECONDS } from '../../srs.js';
+import { displayForm } from '../../grading.js';
 
 let n = 0;
 const freshName = () => `test-${++n}`;
@@ -177,5 +180,60 @@ test('if writing fails half-way, nothing is lost (all or nothing)', async () => 
   const bad = { ...before, cards: [{ id: {}, wordId: 1 }, ...before.cards] };
   await assert.rejects(() => db.replaceAll(bad));
   assert.deepEqual(await db.dump(), before);
+  db.close();
+});
+
+// The store the app gives the session (same calls as app.js).
+const dbStore = (db) => ({
+  putCard: (c) => db.put('cards', c),
+  putWord: (w) => db.put('words', w),
+  addLog: (r) => db.put('reviewLog', r),
+  updateLog: (k, r) => db.put('reviewLog', { ...r, id: k }),
+  addReport: (r) => db.put('reports', r),
+});
+
+test('backup → reset → restore with real FSRS cards: dates stay dates, the same cards are due', async () => {
+  const db = await openDb({ name: freshName() });
+  const words = Array.from({ length: 20 }, (_, i) => ({
+    id: i + 1, rank: i + 1, pos: 'adj', de: `wort${i + 1}`, nl: [`woord${i + 1}`], acceptAlso: [], groups: [], showInitial: false,
+  }));
+  const settings = await db.getSettings();
+  // Day 1: learn 5 words; day 6: review them, one lapse; day 7: start a word and stop halfway.
+  for (const [day, newPerDay, stopAfter] of [[1, 5, Infinity], [6, 0, Infinity], [7, 1, 2]]) {
+    let t = new Date(2026, 9, day, 10).getTime();
+    const s = new Session({
+      words, wordStates: await db.getAll('words'), cards: await db.getAll('cards'), settings: { ...settings, newPerDay },
+      seconds: DEFAULT_SECONDS, store: dbStore(db), now: () => new Date((t += 5000)),
+    });
+    for (let n = 0; n < stopAfter; n++) {
+      const sc = s.next();
+      if (!sc) break;
+      if (sc.step === 'intro') s.answerIntro(sc, 'continue', 3000);
+      else if (sc.step === 'mc') s.answerChoice(sc, sc.correct, 2000);
+      else s.answerTyped(sc, sc.word.id === 2 && sc.step === 'review' ? 'falsch' : displayForm(sc.word), 4000);
+    }
+    await s.flush();
+  }
+  const before = await db.dump();
+  assert.ok(before.cards.some((c) => c.fsrs.lapses >= 1), 'has a lapsed card');
+  assert.ok(before.cards.some((c) => c.step !== null), 'has an unfinished word');
+  assert.ok(before.reviewLog.length > 20);
+  const dueBefore = planToday({ words, wordStates: new Map(before.words.map((w) => [w.wordId, w])), cards: new Map(before.cards.map((c) => [c.id, c])),
+    settings, seconds: DEFAULT_SECONDS, now: new Date(2026, 9, 30, 10) });
+
+  const { text } = await db.exportBackup();
+  await db.resetAll();
+  await db.restoreBackup(db.parseBackup(text));
+  const after = await db.dump();
+  for (const store of ['cards', 'reviewLog', 'words', 'reports', 'settings']) assert.deepEqual(after[store], before[store], store);
+  for (const c of after.cards.filter((x) => x.step === null)) {
+    assert.ok(c.fsrs.due instanceof Date && c.fsrs.last_review instanceof Date, c.id);
+  }
+  assert.ok(after.reviewLog.every((r) => r.ts instanceof Date));
+  const dueAfter = planToday({ words, wordStates: new Map(after.words.map((w) => [w.wordId, w])), cards: new Map(after.cards.map((c) => [c.id, c])),
+    settings, seconds: DEFAULT_SECONDS, now: new Date(2026, 9, 30, 10) });
+  assert.ok(dueBefore.reviews.length > 0);
+  assert.deepEqual(dueAfter.reviews.map((c) => c.id), dueBefore.reviews.map((c) => c.id));
+  assert.deepEqual(dueAfter.learning.map((c) => c.id), dueBefore.learning.map((c) => c.id));
   db.close();
 });

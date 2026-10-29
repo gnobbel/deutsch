@@ -158,3 +158,80 @@ dialog h3 { margin: 0 0 8px; font-size: 20px; }
   main { animation: fade .12s ease-out; }
   @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 }
+
+/* ---------- Home ---------- */
+.big { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+.big .muted { font-weight: 400; }
+.today p:not(.big) { margin-bottom: 4px; }
+
+/* ---------- Session (PLAN §10.3) ---------- */
+.session-head { display: flex; align-items: center; gap: 12px; margin: -8px 0 12px; }
+.progress { flex: 1; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--fg); }
+button.icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; min-height: 44px; padding: 0; border: 0; background: none; font-size: 20px;
+}
+button.icon + button.icon { margin-top: 0; }
+
+.card {
+  border: 2px solid var(--line); border-radius: 16px; background: var(--surface);
+  padding: 16px 18px 14px; margin-bottom: 16px;
+}
+.card .label { font-size: 14px; color: var(--muted); min-height: 1.45em; margin: 0 0 6px; }
+.card.revealed .label { color: var(--fg); font-weight: 700; font-size: 15px; }
+/* The context sentence has a fixed height and sits on the word, so the word is always in the
+   same place (§10.1). */
+.card .context {
+  font-size: 18px; color: var(--muted); margin: 0;
+  min-height: calc(3 * 1.45em); display: flex; align-items: flex-end;
+}
+.card .context b { color: var(--fg); }
+.card .word { font-size: 32px; font-weight: 700; line-height: 1.2; margin: 12px 0 8px; overflow-wrap: anywhere; }
+.card .hint, .card .message { font-size: 15px; margin: 4px 0 0; }
+.card .message { font-weight: 700; }
+.card .example-nl { font-size: 15px; margin: 8px 0 4px; }
+.note-line { font-size: 15px; margin: 6px 0 0; }
+.answer-line { font-size: 15px; margin: 4px 0 6px; }
+.answer-line mark { background: none; color: inherit; text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 3px; }
+.infobar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); margin-top: 10px; padding-top: 4px;
+}
+
+/* Lockups (§10.4) */
+.lockup .form, .lockup .sep { font-weight: 400; color: var(--muted); font-size: 22px; }
+.pill { display: inline-block; border: 2px solid currentColor; border-radius: 999px; padding: 0 .35em; font-size: .8em; vertical-align: .1em; }
+.art .shape { font-size: .6em; vertical-align: .25em; }
+
+/* Gender colors, after answering only (§10.2) */
+.card.revealed.g-der { border-color: var(--der); }
+.card.revealed.g-die { border-color: var(--die); }
+.card.revealed.g-das { border-color: var(--das); }
+.art.g-der { color: var(--der); }
+.art.g-die { color: var(--die); }
+.art.g-das { color: var(--das); }
+
+/* Answer field (§10.5): ≥ 16px so iOS doesn't zoom */
+form.answer { display: flex; gap: 8px; }
+form.answer input {
+  flex: 1; min-width: 0; font: inherit; font-size: 20px; color: inherit;
+  background: var(--surface); border: 1px solid var(--fg); border-radius: 12px; padding: 10px 12px;
+}
+form.answer button { width: auto; flex: none; margin: 0; }
+.retype-label { margin: 0 0 6px; }
+#retypeMsg:empty { display: none; }
+
+.choices button.choice { font-size: 19px; text-align: left; }
+
+/* ä ö ü ß key row, kept just above the keyboard by app.js */
+.keyrow {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  display: flex; gap: 6px; justify-content: center;
+  padding: 6px calc(env(safe-area-inset-right) + 8px) calc(6px + env(safe-area-inset-bottom)) calc(env(safe-area-inset-left) + 8px);
+  background: var(--bg); border-top: 1px solid var(--line);
+}
+.keyrow[hidden] { display: none; }
+.keyrow button { width: 56px; min-height: 44px; padding: 0; font-size: 20px; }
+.keyrow button + button { margin-top: 0; }
+body.with-keyrow main.full { padding-bottom: calc(env(safe-area-inset-bottom) + 80px); }

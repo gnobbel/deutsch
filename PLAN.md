@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 1 built and verified (v0.1.5; words 1–500 had two independent band reviews); waiting for the owner to install it on his iPhone (last "Done when" check). Next: Stage 2, first item.
+**Status:** Stage 2 built and verified (v0.2.0); waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
 
 ---
 
@@ -73,7 +73,7 @@ Two or three sentences on what changed and what you decided on his behalf, then 
 ## 3. Technical constraints
 
 - Progressive web app in **plain HTML/CSS/JavaScript** (ES modules). No framework, no bundler, no build step: GitHub Pages serves the files as they are. Dev tooling (tests, Playwright) is fine, as long as the app never loads it.
-- Third-party code in the app only as vendored single files in `/vendor/`, with a compatible license (e.g. MIT), and only when clearly worth it. The likely candidate is FSRS (`ts-fsrs` browser build).
+- Third-party code in the app only as vendored single files in `/vendor/`, with a compatible license (e.g. MIT), and only when clearly worth it. **Decided (Stage 2):** `vendor/ts-fsrs.js` is ts-fsrs 5.4.2 (`dist/index.mjs`, MIT, no dependencies; renamed to `.js` so every server sends it as JavaScript), license in `vendor/ts-fsrs.LICENSE.txt`. 6.0.0 was a day old at the time.
 - Served from a **subpath** (`/deutsch/`): every path is relative (`./`), and the manifest's `start_url`/`scope` and the service-worker scope must work under it.
 - **Fully offline** after the first load.
 - **All progress lives on the phone in IndexedDB.** Nothing personal leaves the device except when the owner copies a list or exports a backup himself. Call `navigator.storage.persist()` on first run.
@@ -84,6 +84,7 @@ Two or three sentences on what changed and what you decided on his behalf, then 
 - `npm test`: unit tests (`node --test`) and the data validator.
 - `npm run e2e`: Playwright. Loads the app at the subpath at iPhone size (WebKit if available, otherwise Chromium), runs a short session, checks offline reload, and fails on console errors.
 - `npm run check`: everything above, plus the version-bump check (`tools/check-version.js`, §12.4). Must pass before every push.
+- `node tools/simulate.js`: the 90-day simulation (§8.1); its options are listed at the top of the file.
 
 ### File layout (starting point; adjust if there's a good reason)
 ```
@@ -192,6 +193,8 @@ Each card has its own FSRS schedule. Cards for established words come rarely, so
 5. Two correct typings → the card **graduates** to review. A miss in a typing step → multiple choice once more, then typing again.
 
 If the session ends first, the word stays in learning and continues at the start of the next session.
+
+**Decided (Stage 2):** an Almost in a learning typing step counts as passed (after retyping); only Wrong sends the word back to multiple choice. When nothing else is left in the session, a waiting step comes right away instead of after its 3 or 8 other cards ("near the session's end").
 
 **"Te makkelijk"** asks for **one typed answer** with the intro hidden. Correct (article included) → it skips learning and goes to review with an Easy first rating (its recognition card too, if it has one), and **doesn't count toward the daily limit**. Otherwise → the normal learning steps.
 
@@ -334,8 +337,8 @@ There's no in-app editor. Instead:
 ## 12. Storage, backup, updates
 
 ### 12.1 IndexedDB stores
-- `cards`: `{ id: "214:production", wordId, type, fsrs, suspended: bool, step, leech }`. `fsrs` is the FSRS library's card object, stored whole and unchanged (state new/learning/review/relearning, stability, difficulty, due, last review, reps, lapses and any other fields the library keeps), so it always round-trips through the library. `suspended` is a separate flag: suspending never touches `fsrs`, so unsuspending restores the card exactly as it was.
-- `reviewLog`: `{ cardId, ts, grade, answer, ms, practice: bool }`
+- `cards`: `{ id: "214:production", wordId, type, fsrs, suspended: bool, step, leech }`. `step` is the session step the card is at (`intro`, `mc`, `type1`, `type2`, `tooEasy`, `relearn`) or null once it is in review; a new card's `fsrs.last_review` is stored as null instead of the library's undefined, which a JSON backup would drop. `fsrs` is the FSRS library's card object, stored whole and unchanged (state new/learning/review/relearning, stability, difficulty, due, last review, reps, lapses and any other fields the library keeps), so it always round-trips through the library. `suspended` is a separate flag: suspending never touches `fsrs`, so unsuspending restores the card exactly as it was.
+- `reviewLog`: `{ cardId, ts, grade, answer, ms, practice: bool, step, outcome }`. `step` is `intro`/`mc`/`type1`/`type2`/`tooEasy`/`review`/`relearn`; `grade` is null for steps that aren't rated (§8.1); `outcome` is the grading outcome (§7.2), `continue`/`tooEasy` on the intro, or `override` after "Ik had gelijk".
 - `words`: `{ wordId, introducedOn, tooEasy, knownMarked, queuedNext, accepted: [] }` (`accepted` holds answers allowed through "Ik had gelijk")
 - `reports`: `{ wordId, ts, kind: "override|report", answer, note }`
 - `settings`, `meta` (`schemaVersion`, `lastBackup`, `appVersion`, copy-list choice)
@@ -354,7 +357,7 @@ There's no in-app editor. Instead:
 - Precache the app shell, fonts, icons and all word files under a versioned cache name (`deutsch-vX.Y.Z`). **One version constant, bumped on every push that changes any file the service worker caches** (code, styles, `vendor/`, fonts, icons, manifest and every file in `words/`), also shown in Settings. Delete stale caches on activate.
 - `tools/check-version.js` (part of `npm run check`) fails when any cached file differs from `origin/main` while the version constant doesn't, and when a file in `words/` is missing from the precache list.
 - Cache-first for app files.
-- **Never reload mid-session.** A new version shows "Update beschikbaar" on Home; it applies on tap, or at the next cold start. (Stage 2: the session screen must not count as Home. `app.js` re-renders Home when an update arrives, so a session needs its own route or hidden tabs.)
+- **Never reload mid-session.** A new version shows "Update beschikbaar" on Home; it applies on tap, or at the next cold start. The session screen hides the tabs and `app.js` never re-renders Home while a session runs.
 
 ### 12.5 iOS notes
 - The home-screen app has **separate storage** from Safari tabs, and deleting the icon deletes all progress. The README and first-run screen say both.
@@ -378,15 +381,15 @@ One stage per session. Start each stage by planning it against this section, the
 *Done when:* `npm run check` passes · e2e shows the app working offline at `/deutsch/` · an e2e test changes the version and confirms the update applies without losing stored data · a backup → reset → restore round trip restores identical data (test) · crosscheck report has no unresolved disagreements · the owner has installed it on his iPhone.
 
 ### Stage 2 — Daily learning
-- [ ] `grading.js` with all tests from §7.6
-- [ ] FSRS (vendored), production card, review log, day boundary
-- [ ] New-word flow: intro → multiple choice → two typing steps; Te makkelijk; confusable-set rule
-- [ ] Lapses and relearning; siblings rule; overdue pause
-- [ ] Start session with new words mixed in; "Klaar voor vandaag" (copy button can come in Stage 3)
-- [ ] "Ik had gelijk" with its safeguards (local `accepted` list)
-- [ ] Key row, audio after answering, gender colors, lockups, de/het and false-friend notes
-- [ ] Home: due count, minutes, new words left
-- [ ] `tools/simulate.js` and the 90-day report
+- [x] `grading.js` with all tests from §7.6
+- [x] FSRS (vendored), production card, review log, day boundary
+- [x] New-word flow: intro → multiple choice → two typing steps; Te makkelijk; confusable-set rule
+- [x] Lapses and relearning; siblings rule; overdue pause
+- [x] Start session with new words mixed in; "Klaar voor vandaag" (copy button can come in Stage 3)
+- [x] "Ik had gelijk" with its safeguards (local `accepted` list)
+- [x] Key row, audio after answering, gender colors, lockups, de/het and false-friend notes
+- [x] Home: due count, minutes, new words left
+- [x] `tools/simulate.js` and the 90-day report
 
 *Done when:* `npm run check` passes · an e2e test introduces a new word, completes its learning steps and sees it graduate · the backup → reset → restore test is rerun with real FSRS cards and review-log entries, and confirms dates come back as dates and the same cards are due before and after · the simulation report has been shared with the owner and looks sensible · the owner has tried a full session on his phone.
 

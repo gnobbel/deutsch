@@ -31,6 +31,9 @@ export const DEFAULT_SETTINGS = {
   retention: 0.9,
   ignoreCase: true,
   umlautShortcuts: true,
+  audio: true,
+  audioRate: 1,
+  audioVoice: null,
 };
 
 // Data migrations, in order. Each takes a dump ({store: rows[]}) at schema `to - 1`
@@ -148,6 +151,21 @@ export class Db {
   async getAll(store) {
     const tx = this.idb.transaction(store);
     return req(tx.objectStore(store).getAll());
+  }
+
+  // The newest `limit` rows of a store by an index (e.g. the last answers in the review log).
+  getRecent(store, index, limit) {
+    return new Promise((resolve, reject) => {
+      const out = [];
+      const r = this.idb.transaction(store).objectStore(store).index(index).openCursor(null, 'prev');
+      r.onsuccess = () => {
+        const cur = r.result;
+        if (!cur || out.length >= limit) return resolve(out);
+        out.push(cur.value);
+        cur.continue();
+      };
+      r.onerror = () => reject(r.error);
+    });
   }
 
   async put(store, value) {
