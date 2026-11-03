@@ -95,7 +95,7 @@ test('base: must exist and come earlier', () => {
 test('two words with the same prompt need different nlHints (or first letters)', () => {
   const wo = { ...handy(), id: 1, rank: 1, pos: 'adv', de: 'wo', nl: ['waar'], nlArticle: null };
   delete wo.article; delete wo.plural;
-  const wahr = { ...wo, id: 2, rank: 2, pos: 'adj', de: 'wahr' };
+  const wahr = { ...wo, id: 2, rank: 2, pos: 'adj', de: 'wahr', example: { de: 'Das ist [[wahr]].', nl: 'Dat is waar.' } };
   assert.match(validateAll([wo, wahr]).join(), /same prompt as wo/);
   assert.deepEqual(validateAll([wo, { ...wahr, nlHint: 'juist' }]), []);
   assert.deepEqual(validateAll([wo, { ...wahr, showInitial: true, de: 'xwahr' }]), [], 'a first-letter hint also tells them apart');
@@ -121,4 +121,9 @@ test('the same word in two band files is caught', () => {
   assert.deepEqual(validateWords([handy()], { seenIds, seenKeys }), []);
   const again = { ...handy(), id: 600, rank: 600, freq: 600, level: 'A2' };
   assert.match(validateWords([again], { seenIds, seenKeys }).join(), /duplicate \(de, pos, meaning\)/);
+});
+
+test('every example sentence is unique', () => {
+  const b = { ...handy(), id: 300, rank: 300, de: 'Smartphone', nl: ['smartphone'] };
+  assert.match(validateAll([handy(), b]).join(), /same example sentence as Handy/);
 });
