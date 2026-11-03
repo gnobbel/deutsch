@@ -8,7 +8,7 @@ import {
 } from './srs.js';
 
 // Every word file, in rank order (all of them are precached by sw.js).
-export const WORD_FILES = ['words/words-0001-0500.json', 'words/words-0501-1000.json'];
+export const WORD_FILES = ['words/words-0001-0500.json', 'words/words-0501-1000.json', 'words/words-1001-1500.json'];
 
 export const REVIEWS_PER_NEW = 4;
 // How many other cards must come in between (§6.2).

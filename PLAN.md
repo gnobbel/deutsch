@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 2 built and verified (v0.2.0); owner feedback added in v0.2.1 (levels with "te makkelijk", example sentence behind "Toon zin") and v0.3.0 (real CEFR levels from the Goethe lists, everyday words first, 138 new words incl. 18 phrases, prompt hints, hard-word cap, word families) and v0.4.0 (words 639–1,000: the Stage 3 word band is done). Waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
+**Status:** Stage 2 built and verified (v0.2.0); owner feedback added in v0.2.1 (levels with "te makkelijk", example sentence behind "Toon zin") and v0.3.0 (real CEFR levels from the Goethe lists, everyday words first, 138 new words incl. 18 phrases, prompt hints, hard-word cap, word families) and v0.4.0 (words 639–1,000: the Stage 3 word band is done) and v0.5.0 (words 1,001–1,500, the first Stage 4 band: 669 A1, 527 A2, 299 B1 words in total; no Goethe A1 word missing). Waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
 
 ---
 
@@ -417,7 +417,7 @@ One stage per session. Start each stage by planning it against this section, the
 ### Stage 4 — Advanced cards and Endless
 - [ ] Cloze, plural and verbforms cards with the 21-day unlock and the daily cap (§5); `clozeOnly` words via cloze
 - [ ] Eindeloos with practice and "+5 nieuwe woorden"
-- [ ] **Words 1,001–2,000** in bands of 500, each with the checks from §4.3
+- [ ] **Words 1,001–2,000** in bands of 500, each with the checks from §4.3 (1,001–1,500 done in v0.5.0, incl. 15 `clozeOnly` grammar words waiting for cloze cards; 1,501–2,000 next: the ~100 Goethe A2 words `node tools/order.js` still lists, then frequent B1 words)
 
 *Done when:* `npm run check` passes · the simulation still looks sensible with the new card types, including days when many words cross the 21-day unlock at once.
 

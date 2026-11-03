@@ -121,7 +121,8 @@ export const SKIP = new Set(`
   circa ca. z. B. usw. bzw. Sg. pl. Pommes frites Cent fährt besser
   Fax CD Disco Anrufbeantworter Prospekt Halbpension Lkw Kiosk Vorwahl Anrede Postleitzahl Absender Empfänger
   Geburtsjahr Geburtsort Familienstand ankreuzen anklicken Ansage Durchsage Bogen Anschluss Halle Schalter Automat
-  Papiere heraus herein enden geöffnet ausländisch weiblich männlich Ehefrau Hausfrau Beamte Jugendliche Verwandte Kilo Gramm Liter Meter Zentimeter Kilometer Prozent Grad
+  Papiere heraus herein enden geöffnet ausländisch weiblich männlich Ehefrau Hausfrau
+  Schluss Aussage international Anzeige Führung Lokal Apartment zurzeit automatisch bitter Zoll selbstständig Drucker kulturell Kilo Gramm Liter Meter Zentimeter Kilometer Prozent Grad
   Sonnabend Frühjahr Wochentag Deutsche Europa Deutschland Norden Süden Westen Osten erste zweite dritte Viertel
   Milliarde dreißig vierzig fünfzig sechzig siebzig achtzig neunzig elf zwölf
 `.trim().split(/\s+/).map((x) => x.toLowerCase()));
