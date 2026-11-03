@@ -79,5 +79,6 @@
   {"id":1412,"de":"vereinbaren","field":"verb","reason":"not in Morphy as a lemma; forms follow the base verb: weak: vereinbarte, vereinbart"},
   {"id":1418,"de":"herunterladen","field":"verb","reason":"not in Morphy as a lemma; forms follow the base verb: lädt herunter, lud herunter, heruntergeladen (laden)"},
   {"id":1264,"de":"vorhaben","field":"verb","reason":"not in Morphy as a lemma; forms follow the base verb: hat vor, hatte vor, vorgehabt (haben)"},
-  {"id":1067,"de":"Süßigkeiten","field":"noun","reason":"plural-only in everyday use (die Süßigkeiten = snoep); the singular Süßigkeit is rare"}
+  {"id":1067,"de":"Süßigkeiten","field":"noun","reason":"plural-only in everyday use (die Süßigkeiten = snoep); the singular Süßigkeit is rare"},
+  {"id":1011,"de":"Hausaufgaben","field":"noun","reason":"taught in the plural (die Hausaufgaben = huiswerk); the singular Hausaufgabe is one assignment"}
 ]
