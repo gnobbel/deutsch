@@ -137,6 +137,13 @@ export function validateAll(all) {
     if (!b) errors.push(`#${w.id} ${w.de}: base ${w.base} doesn't exist`);
     else if (b.rank >= w.rank) errors.push(`#${w.id} ${w.de}: base ${b.de} must come earlier`);
   }
+  // Every word has its own example sentence (a shared one makes two cards look the same).
+  const sentences = new Map();
+  for (const w of all) {
+    const k = w.example?.de?.replace(/\[\[|\]\]/g, '');
+    if (k && sentences.has(k)) errors.push(`#${w.id} ${w.de}: same example sentence as ${sentences.get(k).de}`);
+    else if (k) sentences.set(k, w);
+  }
   const prompts = new Map();
   for (const w of all) {
     if (w.clozeOnly) continue;

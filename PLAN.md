@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 2 built and verified (v0.2.0); owner feedback added in v0.2.1 (levels with "te makkelijk", example sentence behind "Toon zin") and v0.3.0 (real CEFR levels from the Goethe lists, everyday words first, 138 new words incl. 18 phrases, prompt hints, hard-word cap, word families). Waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
+**Status:** Stage 2 built and verified (v0.2.0); owner feedback added in v0.2.1 (levels with "te makkelijk", example sentence behind "Toon zin") and v0.3.0 (real CEFR levels from the Goethe lists, everyday words first, 138 new words incl. 18 phrases, prompt hints, hard-word cap, word families) and v0.4.0 (words 639–1,000: the Stage 3 word band is done). Waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
 
 ---
 
@@ -410,7 +410,7 @@ One stage per session. Start each stage by planning it against this section, the
 - [ ] Woorden tab: Kopieer woorden, Recent / Gevestigd / Wankel, search, word detail with its actions
 - [ ] Meld fout + Meldingen list + Kopieer meldingen
 - [ ] Leeches; Home stats line; backup reminder
-- [ ] **Words 501–1,000** with the checks from §4.3 (v0.3.0 already put 138 words in 501–638: the A1/A2 words and phrases that the new order moved past 500; the Goethe A1/A2 words still missing come next, `node tools/order.js` lists them)
+- [x] **Words 501–1,000** with the checks from §4.3 (v0.3.0: 138 words, v0.4.0: 362 more; 650 of the first 1,000 are A1. The ~30 Goethe A1 words still missing, e.g. *Briefmarke, Straßenbahn, Auskunft*, go into the next band; `node tools/order.js` lists them)
 
 *Done when:* `npm run check` passes (incl. copy-list format tests) · e2e: copy a word list, report a word, copy the reports · a test with a few hundred already-learned words and recognition cards switched back on shows new recognition cards stay within the daily cap · the simulation, rerun with recognition cards, still looks sensible.
 

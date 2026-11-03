@@ -119,7 +119,9 @@ export const SKIP = new Set(`
   danken entschuldigen Dank Ordnung Wiedersehen bisschen Ahnung Hause Paar Beispiel Fall Leid
   mögen möchten möchte gestorben geboren verheiratet ledig geschieden
   circa ca. z. B. usw. bzw. Sg. pl. Pommes frites Cent fährt besser
-  Fax CD Disco Anrufbeantworter Prospekt Halbpension Lkw Kiosk Vorwahl Anrede Postleitzahl Absender Empfänger Kilo Gramm Liter Meter Zentimeter Kilometer Prozent Grad
+  Fax CD Disco Anrufbeantworter Prospekt Halbpension Lkw Kiosk Vorwahl Anrede Postleitzahl Absender Empfänger
+  Geburtsjahr Geburtsort Familienstand ankreuzen anklicken Ansage Durchsage Bogen Anschluss Halle Schalter Automat
+  Papiere heraus herein enden geöffnet ausländisch weiblich männlich Ehefrau Hausfrau Beamte Jugendliche Verwandte Kilo Gramm Liter Meter Zentimeter Kilometer Prozent Grad
   Sonnabend Frühjahr Wochentag Deutsche Europa Deutschland Norden Süden Westen Osten erste zweite dritte Viertel
   Milliarde dreißig vierzig fünfzig sechzig siebzig achtzig neunzig elf zwölf
 `.trim().split(/\s+/).map((x) => x.toLowerCase()));
@@ -130,7 +132,9 @@ export const FREQ_FIX = { weiß: 800, lange: 600 };
 function report(words) {
   const goethe = loadGoethe();
   const est = freqEstimator();
-  const have = new Set(words.flatMap((w) => [w.de, ...(w.acceptAlso || [])]).map((x) => x.toLowerCase().replace(/^(der|die|das|sich) /, '')));
+  // A word counts as present when it is an entry, an accepted alternative, or part of a phrase.
+  const have = new Set(words.flatMap((w) => [w.de, ...(w.acceptAlso || []), ...(w.pos === 'phrase' ? w.de.split(' ') : [])])
+    .map((x) => x.toLowerCase().replace(/^(der|die|das|sich) /, '')));
   const missing = goethe ? [...goethe.values()].filter((g) => g.level !== 'B1' && !/[ -]/.test(g.lemma)
     && !have.has(g.lemma.toLowerCase()) && !SKIP.has(g.lemma.toLowerCase())) : [];
   // Where would the missing ones land among the words we have?

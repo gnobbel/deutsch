@@ -10,7 +10,8 @@ const words = WORD_FILES.flatMap((f) => JSON.parse(readFileSync(new URL(`../../$
 // The prompt side shows the Dutch word, and the Dutch sentence after "Toon zin"; together they
 // identify the word.
 const byPrompt = new Map(words.map((w) => [`${promptWord(w)}|${w.example.nl}`, w]));
-// On the revealed side the German sentence (markers removed) identifies it.
+// On the revealed side the German sentence (markers removed) identifies it (the validator keeps
+// every sentence unique).
 const byGerman = new Map(words.map((w) => [w.example.de.replace(/\[\[|\]\]/g, ''), w]));
 
 async function readIdb(page) {
