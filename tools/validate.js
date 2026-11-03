@@ -14,13 +14,13 @@ export const GROUPS = [
 ];
 const OPP = /^opp:[a-zäöüß]+-[a-zäöüß]+$/;
 
-export function levelForRank(rank) {
-  if (rank <= 500) return 'A1';
-  if (rank <= 1000) return 'A2';
-  if (rank <= 2000) return 'B1';
-  if (rank <= 3500) return 'B2';
-  return 'C1';
-}
+// CEFR level: from the Goethe-Institut lists where the word is on them, otherwise our judgment
+// (PLAN §4.1). It decides the learning order together with `freq` (tools/order.js).
+export const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1'];
+
+// What the prompt side shows for a word: the Dutch word (with de/het for nouns), its hint, and
+// the first letter when `showInitial` is on.
+export const promptKey = (w) => `${w.pos === 'noun' && w.nlArticle ? `${w.nlArticle} ` : ''}${w.nl?.[0]}|${w.nlHint ?? ''}|${w.showInitial ? w.de[0].toLowerCase() : ''}`;
 
 const isStr = (v) => typeof v === 'string' && v.trim() === v && v.length > 0;
 const isStrOrNull = (v) => v === null || isStr(v);
@@ -49,8 +49,11 @@ export function validateWords(entries, { range = null, seenIds = new Set(), seen
       if (ranks.has(w.rank)) err('duplicate rank');
       ranks.add(w.rank);
       if (range && (w.rank < range[0] || w.rank > range[1])) err(`rank outside ${range[0]}–${range[1]}`);
-      if (w.level !== levelForRank(w.rank)) err(`level should be ${levelForRank(w.rank)}`);
     }
+    if (!Number.isInteger(w.freq) || w.freq < 1) err('freq must be a positive integer (place in the frequency list)');
+    if (!LEVELS.includes(w.level)) err(`level must be one of ${LEVELS.join(', ')}`);
+    if (w.nlHint !== undefined && !isStr(w.nlHint)) err('nlHint must be a short text or absent');
+    if (w.base !== undefined && (!Number.isInteger(w.base) || w.base === w.id)) err('base must be the id of another word');
     if (!POS.includes(w.pos)) err(`unknown pos ${w.pos}`);
     if (!isStr(w.de)) err('de missing');
     if (!Array.isArray(w.nl) || !w.nl.length || !w.nl.every(isStr)) err('nl must be a non-empty list');
@@ -120,6 +123,30 @@ export function validateWords(entries, { range = null, seenIds = new Set(), seen
   return errors;
 }
 
+// Checks across all files: every `base` exists and comes earlier; no two words show the same
+// prompt (the sentence is hidden by default, so `nlHint` must tell them apart).
+export function validateAll(all) {
+  const errors = [];
+  const byId = new Map(all.map((w) => [w.id, w]));
+  const ranks = new Set();
+  for (const w of all) {
+    if (ranks.has(w.rank)) errors.push(`#${w.id} ${w.de}: duplicate rank ${w.rank}`);
+    ranks.add(w.rank);
+    if (w.base === undefined) continue;
+    const b = byId.get(w.base);
+    if (!b) errors.push(`#${w.id} ${w.de}: base ${w.base} doesn't exist`);
+    else if (b.rank >= w.rank) errors.push(`#${w.id} ${w.de}: base ${b.de} must come earlier`);
+  }
+  const prompts = new Map();
+  for (const w of all) {
+    if (w.clozeOnly) continue;
+    const k = promptKey(w);
+    if (prompts.has(k)) errors.push(`#${w.id} ${w.de}: same prompt as ${prompts.get(k).de} (${k.replaceAll('|', ' ').trim()}); give them different nlHints`);
+    else prompts.set(k, w);
+  }
+  return errors;
+}
+
 function main() {
   const dir = fileURLToPath(new URL('../words/', import.meta.url));
   let files = [];
@@ -132,6 +159,7 @@ function main() {
   const seenKeys = new Set();
   let total = 0;
   let checks = 0;
+  const all = [];
   let failed = false;
   for (const f of files) {
     const m = f.match(/^words-(\d{4})-(\d{4})\.json$/);
@@ -145,7 +173,9 @@ function main() {
     failed ||= errors.length > 0;
     total += entries.length;
     checks += entries.filter((w) => w.check).length;
+    all.push(...entries);
   }
+  for (const e of validateAll(all)) { console.error(`✗ ${e}`); failed = true; }
   if (failed) process.exit(1);
   console.log(`✓ validate: ${total} words in ${files.length} file(s), ${checks} marked check`);
 }

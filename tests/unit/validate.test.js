@@ -1,16 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateWords, levelForRank } from '../../tools/validate.js';
+import { validateWords, validateAll } from '../../tools/validate.js';
 
 const handy = () => ({
-  id: 214, rank: 214, level: 'A1', pos: 'noun',
+  id: 214, rank: 214, freq: 214, level: 'A1', pos: 'noun',
   de: 'Handy', article: 'das', plural: 'Handys',
   nl: ['mobiele telefoon', 'mobieltje', 'gsm'], nlArticle: 'de',
   example: { de: 'Mein [[Handy]] ist schon wieder kaputt.', nl: 'Mijn mobieltje is alweer kapot.' },
   acceptAlso: [], showInitial: false, falseFriend: null, cognate: true, groups: [], check: false,
 });
 const anfangen = () => ({
-  id: 90, rank: 90, level: 'A1', pos: 'verb', de: 'anfangen',
+  id: 90, rank: 90, freq: 90, level: 'A1', pos: 'verb', de: 'anfangen',
   nl: ['beginnen'], nlArticle: null,
   example: { de: 'Ich [[fange]] morgen [[an]].', nl: 'Ik begin morgen.' },
   acceptAlso: ['beginnen'], showInitial: false, falseFriend: null, cognate: false, groups: [], check: false,
@@ -73,12 +73,33 @@ test('false friends must not be marked cognate', () => {
   assert.match(errs([w]), /cognate: false/);
 });
 
-test('rank must fit the file and the level must match the band', () => {
+test('rank must fit the file; level is a CEFR label; freq is required', () => {
   assert.match(errs([handy()], { range: [501, 1000] }), /rank outside 501–1000/);
   const w = handy();
   w.level = 'B1';
-  assert.match(errs([w]), /level should be A1/);
-  assert.equal(levelForRank(501), 'A2');
+  assert.deepEqual(validateWords([w]), [], 'the level no longer follows the rank band');
+  w.level = 'A3';
+  assert.match(errs([w]), /level must be one of/);
+  delete w.freq;
+  w.level = 'A1';
+  assert.match(errs([w]), /freq must be a positive integer/);
+});
+
+test('base: must exist and come earlier', () => {
+  const b = { ...handy(), id: 300, rank: 300, de: 'Smartphone', base: 214, example: { de: 'Mein [[Smartphone]] ist neu.', nl: 'Mijn smartphone is nieuw.' }, nl: ['smartphone'] };
+  assert.deepEqual(validateAll([handy(), b]), []);
+  assert.match(validateAll([handy(), { ...b, rank: 100 }]).join(), /base Handy must come earlier/);
+  assert.match(validateAll([handy(), { ...b, base: 999 }]).join(), /base 999 doesn't exist/);
+});
+
+test('two words with the same prompt need different nlHints (or first letters)', () => {
+  const wo = { ...handy(), id: 1, rank: 1, pos: 'adv', de: 'wo', nl: ['waar'], nlArticle: null };
+  delete wo.article; delete wo.plural;
+  const wahr = { ...wo, id: 2, rank: 2, pos: 'adj', de: 'wahr' };
+  assert.match(validateAll([wo, wahr]).join(), /same prompt as wo/);
+  assert.deepEqual(validateAll([wo, { ...wahr, nlHint: 'juist' }]), []);
+  assert.deepEqual(validateAll([wo, { ...wahr, showInitial: true, de: 'xwahr' }]), [], 'a first-letter hint also tells them apart');
+  assert.deepEqual(validateAll([wo, { ...wahr, clozeOnly: true }]), [], 'cloze-only words have no prompt');
 });
 
 test('reflexive verbs are written without sich', () => {
@@ -98,6 +119,6 @@ test('the same word in two band files is caught', () => {
   const seenIds = new Set();
   const seenKeys = new Set();
   assert.deepEqual(validateWords([handy()], { seenIds, seenKeys }), []);
-  const again = { ...handy(), id: 600, rank: 600, level: 'A2' };
+  const again = { ...handy(), id: 600, rank: 600, freq: 600, level: 'A2' };
   assert.match(validateWords([again], { seenIds, seenKeys }).join(), /duplicate \(de, pos, meaning\)/);
 });

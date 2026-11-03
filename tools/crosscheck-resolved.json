@@ -12,5 +12,12 @@
   {"id":383,"de":"schließen","field":"forms.praet","reason":"old spelling schloß; current spelling is schloss"},
   {"id":455,"de":"hängen","field":"forms.praet","reason":"our entry is intransitive hängen (Das Bild hängt an der Wand): hing, gehangen; Morphy lists the transitive hängte"},
   {"id":473,"de":"bewegen","field":"strong","reason":"our entry is bewegen = move (weak: bewegte, bewegt); the strong bewog/bewogen means induce"},
-  {"id":482,"de":"Zukunft","field":"plural","reason":"Zukünfte is rare and abstract; for the learner Zukunft has no plural"}
+  {"id":482,"de":"Zukunft","field":"plural","reason":"Zukünfte is rare and abstract; for the learner Zukunft has no plural"},
+  {"id":561,"de":"Deutsch","field":"article","reason":"das Deutsch is the language (Ich lerne Deutsch); Wiktionary only lists the adjective/proper-noun readings"},
+  {"id":548,"de":"Regen","field":"plural","reason":"Regen is uncountable in everyday use; the plural Regen exists only for kinds of rain"},
+  {"id":502,"de":"Milch","field":"plural","reason":"Milch is uncountable for the learner; Milche/Milchen are technical plurals"},
+  {"id":546,"de":"Wetter","field":"plural","reason":"Wetter (weather) is uncountable; the plural Wetter belongs to the mining sense"},
+  {"id":562,"de":"Kleidung","field":"plural","reason":"Kleidung is a mass noun; Kleidungen is rare"},
+  {"id":509,"de":"Gemüse","field":"plural","reason":"Gemüse is a mass noun for the learner; the plural is only used for kinds of vegetables"},
+  {"id":620,"de":"kennenlernen","field":"strong","reason":"kennenlernen is weak (lernte kennen, kennengelernt); Morphy's forms agree, the flag comes from kennen being mixed"}
 ]

@@ -7,6 +7,7 @@ Read PLAN.md before doing anything. It is the spec, and its Status line and stag
 - `npm test`: unit tests (`node --test`) + data validator
 - `npm run e2e`: Playwright run at iPhone size, incl. offline reload
 - `npm run check`: all of the above + the version-bump check. IMPORTANT: must pass before every push.
+- `node tools/order.js`: learning-order report (where words land, Goethe A1/A2 words still missing); `--write` renumbers ranks and re-splits `words/` after adding words (PLAN §4.1). Needs `node tools/fetch-sources.js` first.
 - `node tools/simulate.js`: 90-day simulated learner (reviews, minutes, retention per week). Rerun after any scheduling change and report it (PLAN §8.1).
 
 ## Rules that are easy to get wrong

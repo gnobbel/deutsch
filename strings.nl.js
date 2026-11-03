@@ -84,6 +84,7 @@ export const S = {
     play: 'Uitspraak afspelen',
     deHet: (nl, de) => `NL: ${nl} → DE: ${de}`,
     falseFriend: (de, nl) => `Let op: ${de} ≠ ${nl}.`,
+    related: (de) => `Verwant met: ${de}`,
     praet: 'verl. tijd',
     comparison: 'trappen',
     pluralOnly: 'alleen meervoud',

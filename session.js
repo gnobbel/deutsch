@@ -8,7 +8,7 @@ import {
 } from './srs.js';
 
 // Every word file, in rank order (all of them are precached by sw.js).
-export const WORD_FILES = ['words/words-0001-0500.json'];
+export const WORD_FILES = ['words/words-0001-0500.json', 'words/words-0501-1000.json'];
 
 export const REVIEWS_PER_NEW = 4;
 // How many other cards must come in between (§6.2).
@@ -53,6 +53,30 @@ export function currentLevel(words, wordStates, easyLevels = []) {
   return next ? levelOf(next) : null;
 }
 
+// ---------- difficulty for a Dutch speaker (§6.1) ----------
+
+// How hard a word is to learn for a Dutch speaker, from fields the data already has. This is
+// separate from `level` (how advanced it is): Haus is A1 and easy, Mädchen is A1 and not.
+export function difficultyOf(w) {
+  let d = 0;
+  if (!w.cognate) d += 2;
+  if (w.falseFriend) d += 2;
+  if (w.pos === 'noun' && w.nlArticle && ((w.nlArticle === 'het') !== (w.article === 'das'))) d += 1;
+  if (w.pos === 'verb' && w.strong) d += 1;
+  if (w.separable) d += 1;
+  if (w.reflexive || w.governs) d += 1;
+  if (w.pos === 'phrase') d += 1;
+  if (w.de.length > 10) d += 1;
+  return d;
+}
+
+// Bands: 0–1 easy, 2–3 medium, 4+ hard.
+export const difficultyBand = (w) => { const d = difficultyOf(w); return d >= 4 ? 'hard' : d >= 2 ? 'medium' : 'easy'; };
+export const isHard = (w) => difficultyBand(w) === 'hard';
+
+// At most this many hard new words a day (a fixed number), so no day is all hard words.
+export const HARD_PER_DAY = 4;
+
 // ---------- choosing new words (§6.1) ----------
 
 // A word counts toward today's limit when it was introduced today, unless it passed Te makkelijk
@@ -82,9 +106,29 @@ function learningGroups(words, cards, extraBusy = new Set()) {
   return blocked;
 }
 
-// Confusable-set rule: a word that shares a `groups` label with a word introduced today or still
-// in learning waits (it keeps its place). Words queued with "Leer dit als volgende" go first.
-// A passed quick check doesn't count as introduced: that word was already known.
+// Hard-word cap: a hard word waits (and keeps its place) once HARD_PER_DAY hard words that count
+// toward today's limit have been introduced.
+export function hardCapReached(words, wordStates, now) {
+  const byId = new Map(words.map((w) => [w.id, w]));
+  let n = 0;
+  for (const ws of wordStates.values()) {
+    const w = byId.get(ws.wordId);
+    if (w && countsTowardLimit(ws, now) && isHard(w)) n++;
+  }
+  return n >= HARD_PER_DAY;
+}
+
+// Word families: a word that builds on another (`base`: Fahrrad → fahren, Spaß machen → Spaß)
+// waits until its base word has been introduced. A base that isn't in the data doesn't block.
+export function baseReady(w, wordStates, wordIds) {
+  return w.base == null || !wordIds.has(w.base) || !!wordStates.get(w.base)?.introducedOn;
+}
+
+// Picks the next new word. It is the first in rank order that passes every rule; a word that
+// waits keeps its place. Words queued with "Leer dit als volgende" go first.
+// - Confusable-set rule: no word that shares a `groups` label with a word introduced today or
+//   still in learning. A passed quick check doesn't count as introduced (it was known already).
+// - Hard-word cap and word families (above).
 export function pickNewWord(words, wordStates, cards, now, easy = new Set()) {
   const today = dayKey(now);
   const introduced = new Set();
@@ -92,7 +136,10 @@ export function pickNewWord(words, wordStates, cards, now, easy = new Set()) {
     if (ws.introducedOn && dayKey(ws.introducedOn) === today && !(ws.levelCheck && ws.tooEasy)) introduced.add(ws.wordId);
   }
   const blocked = learningGroups(words, cards, introduced);
-  const free = (w) => isNewCandidate(w, wordStates.get(w.id), easy) && !w.groups.some((g) => blocked.has(g));
+  const capped = hardCapReached(words, wordStates, now);
+  const wordIds = new Set(words.map((w) => w.id));
+  const free = (w) => isNewCandidate(w, wordStates.get(w.id), easy) && !w.groups.some((g) => blocked.has(g))
+    && !(capped && isHard(w)) && baseReady(w, wordStates, wordIds);
   return words.find((w) => free(w) && wordStates.get(w.id)?.queuedNext) || words.find(free) || null;
 }
 

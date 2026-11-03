@@ -6,7 +6,7 @@
 process.env.TZ ||= 'Europe/Amsterdam';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Session, WORD_FILES } from '../session.js';
+import { Session, WORD_FILES, difficultyBand } from '../session.js';
 import { retrievability, secondsPerCard, DEFAULT_SECONDS, dayKey } from '../srs.js';
 import { displayForm } from '../grading.js';
 import { DEFAULT_SETTINGS } from '../db.js';
@@ -24,10 +24,13 @@ export function rng(seed) {
 }
 
 // The learner: recall follows FSRS's own prediction, made a little worse (real learners are
-// noisier than the model); typos now and then; time per card from typical typing speed.
+// noisier than the model), and a little worse again for words that are hard for a Dutch speaker
+// (difficultyOf in session.js); typos now and then; time per card from typical typing speed.
 const LEARNER = {
-  tooEasy: 0.05, tooEasyRight: 0.7, checkRight: 0.9, mcRight: 0.95, learnRight: 0.85, typo: 0.06, relearnRight: 0.9,
+  tooEasy: 0.05, tooEasyRight: 0.7, checkRight: 0.9, mcRight: 0.95, typo: 0.06, relearnRight: 0.9,
+  learnRight: { easy: 0.9, medium: 0.85, hard: 0.75 },
   penalty: 0.04,
+  hardPenalty: 0.04, // extra, on reviews of hard words
   ms: { intro: 15000, mc: 6000, type: 10000, correct: 9000, almost: 14000, wrong: 20000 },
 };
 
@@ -73,10 +76,11 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
         s.answerChoice(sc, random() < LEARNER.mcRight ? sc.correct : (sc.correct + 1) % 4, ms);
       } else {
         let p;
-        if (sc.step === 'review') p = Math.max(0, retrievability(sc.card, now(), retention) - penalty);
+        const band = difficultyBand(word);
+        if (sc.step === 'review') p = Math.max(0, retrievability(sc.card, now(), retention) - penalty - (band === 'hard' ? LEARNER.hardPenalty : 0));
         else if (sc.step === 'relearn') p = LEARNER.relearnRight;
         else if (sc.step === 'tooEasy') p = sc.item.check ? LEARNER.checkRight : LEARNER.tooEasyRight;
-        else p = LEARNER.learnRight;
+        else p = LEARNER.learnRight[band];
         const right = random() < p;
         const slip = right && random() < LEARNER.typo;
         const answer = !right ? 'xyzzy' : slip ? typo(displayForm(word)) : displayForm(word);
@@ -147,7 +151,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Enough words for the whole run: the real ones first, then stand-ins for the bands to come.
   const words = [...real];
   for (let i = 1; words.filter((w) => !w.clozeOnly).length < days * newPerDay * 1.2; i++) {
-    words.push({ id: 100000 + i, rank: 10000 + i, pos: 'adj', de: `wort${i}`, nl: [`woord${i}`], acceptAlso: [], groups: [], showInitial: false });
+    // Stand-ins get a realistic mix of difficulty: every third one is not a cognate.
+    words.push({ id: 100000 + i, rank: 10000 + i, pos: 'adj', de: `wort${i}`, nl: [`woord${i}`], acceptAlso: [], groups: [], showInitial: false, cognate: i % 3 !== 0, falseFriend: null });
   }
   const easy = arg('easy', 0);
   const easyLevels = Array.from({ length: easy }, (_, i) => i + 1);

@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 2 built and verified (v0.2.0); owner feedback added in v0.2.1 (levels with "te makkelijk", example sentence behind "Toon zin"). Waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
+**Status:** Stage 2 built and verified (v0.2.0); owner feedback added in v0.2.1 (levels with "te makkelijk", example sentence behind "Toon zin") and v0.3.0 (real CEFR levels from the Goethe lists, everyday words first, 138 new words incl. 18 phrases, prompt hints, hard-word cap, word families). Waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
 
 ---
 
@@ -56,7 +56,7 @@ Two or three sentences on what changed and what you decided on his behalf, then 
 
 ## 2. Decisions already made (don't reopen unless the owner asks)
 
-- Word order is **purely frequency-based**; there's no course to follow. "Leer dit als volgende" lets the owner pull a word forward.
+- Word order is **frequency weighted by CEFR level, with everyday words first** (owner request, v0.3.0; §4.1); there's no course to follow. "Leer dit als volgende" lets the owner pull a word forward.
 - **No native-speaker check.** Word data is checked by script against Wiktionary plus one fresh-subagent review per band (§4.3). That's enough.
 - **No AI inside the app**, no API keys, no network requests besides loading its own files.
 - **No separate gender card.** A wrong article counts as a wrong answer on the production card. Revisit only if the stats show articles are the main cause of lapses.
@@ -113,8 +113,9 @@ tools/sources/    – downloaded third-party files; gitignored
 
 ### 4.1 Scope and sources
 - **Launch with ~2,000 words** (≈ B1), built in bands of 500 across the stages (§13); at 10 a day that lasts over six months. Later, if the owner asks, add bands of 500 toward ~5,000 (B2/C1), **ahead of use**, so there are always at least ~300 words he hasn't seen yet. Home shows how many new words are left, so the owner can say when it's getting low.
-- **Order comes from a frequency list, computed by script** (`tools/rank.js`), never estimated from memory. **Decided (Stage 1):** DeReWo can't be fetched from the agent's machine, so the order comes from the OpenSubtitles 2018 frequency list, with inflected forms merged into base forms by `rank.js` using the LanguageTool/Morphy morphology dictionaries, so *ist/war/bin* count toward *sein*. Sources, versions and download dates are in `tools/SOURCES.md`; `node tools/fetch-sources.js` downloads them.
-- `level` (A1/A2/B1…) comes from the Goethe lists if they're available locally, otherwise from the rank band (1–500 A1, 501–1000 A2, 1001–2000 B1, 2001–3500 B2, then C1; enforced by the validator).
+- **Order is computed by script, never estimated from memory.** Frequency comes from `tools/rank.js` and is kept per word as `freq`; `tools/order.js` turns `freq` and `level` into `rank` (the learning order), see below. **Decided (Stage 1):** DeReWo can't be fetched from the agent's machine, so the order comes from the OpenSubtitles 2018 frequency list, with inflected forms merged into base forms by `rank.js` using the LanguageTool/Morphy morphology dictionaries, so *ist/war/bin* count toward *sein*. Sources, versions and download dates are in `tools/SOURCES.md`; `node tools/fetch-sources.js` downloads them.
+- `level` (A1/A2/B1/B2/C1) is the lowest Goethe-Institut list (A1, A2, B1) the word is on (`tools/goethe.js`; the lists are used locally only, see `tools/SOURCES.md`), otherwise our judgment, checked in the per-band review. It means *how advanced* a word is; how hard it is *for a Dutch speaker* is a separate, computed score (§6.1).
+- **Learning order (`tools/order.js`, decided v0.3.0 at the owner's request):** subtitles alone put *König, töten, Waffe* before *Brot, Tisch, Montag*. So `rank` = order by `freq` × level weight (A1 0.5 · A2 0.9 · B1 1.4 · B2 1.8 · C1 2.2), with guarantees on top: the k-th A1 word comes no later than 1.25·k (all A1 in about the first 900), A2 words follow, and a short **core** list (numbers, days, months, seasons, colors, family, food, home, transport, shopping, weather, body, directions, clothes; `CORE_WORDS` in `tools/order.js`) comes within about the first 400. A word never comes before its `base`. `node tools/order.js` reports where words land and which Goethe A1/A2 words are still missing (or deliberately skipped); `--write` renumbers `rank` and re-splits the band files. Ids never change, so renumbering before or after launch never touches progress.
 - **Licensing:** commit only our own compiled data (rank number, translations, sentences). Raw third-party files stay in `tools/sources/`, which is gitignored.
 - **Function words with a clean Dutch equivalent** (maar → aber, omdat → weil, zonder → ohne) get normal cards.
 - **Slippery function words** (doch, mal, ja as a particle, es, sich, pronouns, articles, *sein* as an auxiliary…) get `"clozeOnly": true`. They're skipped until cloze cards exist (Stage 4).
@@ -124,7 +125,7 @@ tools/sources/    – downloaded third-party files; gitignored
 ### 4.2 Schema (one object per word)
 ```json
 {
-  "id": 214, "rank": 214, "level": "A1", "pos": "noun",
+  "id": 214, "rank": 214, "freq": 480, "level": "A1", "pos": "noun",
   "de": "Handy", "article": "das", "plural": "Handys",
   "nl": ["mobiele telefoon", "mobieltje", "gsm"], "nlArticle": "de",
   "example": { "de": "Mein [[Handy]] ist schon wieder kaputt.", "nl": "Mijn mobieltje is alweer kapot." },
@@ -133,8 +134,11 @@ tools/sources/    – downloaded third-party files; gitignored
 }
 ```
 - `id`: stable and unique, **never renumbered or reused**. Progress is keyed on it.
+- `rank`: the learning order, computed by `tools/order.js`; `freq`: the word's place in the cleaned frequency list (§4.1).
 - `nl`: accepted Dutch translations; **the first one is the prompt**.
 - `nlArticle`: `"de"`, `"het"` or `null`.
+- `nlHint` (optional): a short Dutch hint shown after the prompt, when two words share the same prompt: *waar (plaats)* = wo, *waar (juist)* = wahr; for true synonyms the register (*krijgen (spreektaal)* = kriegen). The validator rejects two learnable words whose prompts look the same (Dutch word, hint and first-letter hint together).
+- `base` (optional): the id of a word this one builds on (*Fahrrad* → *fahren*, *Spaß machen* → *Spaß*). It waits until its base has been introduced (§6.1), and its answer side shows "Verwant met: fahren".
 - `example.de`: a short, natural, level-appropriate sentence with the target marked `[[…]]` in its exact inflected form. Separable verbs get two markers: `Ich [[fange]] morgen [[an]].` `example.nl` is a natural translation; on the prompt it disambiguates the Dutch word.
 - `acceptAlso`: other German words valid for this Dutch prompt (target *schön*, prompt *mooi* → `["hübsch"]`; *bekommen* → `["kriegen", "erhalten"]`). **Fill this generously.** For every word, ask "what else might a learner reasonably type?" Common Dutch verbs are the worst cases (*kijken* → schauen/sehen/gucken). A correct answer marked wrong is the most likely daily annoyance.
 - `showInitial`: `true` when the sentence alone can't disambiguate the prompt; the prompt then shows the first letter. (The sentence is hidden until "Toon zin"; after a "different valid word" answer it is shown automatically, with the first letter.)
@@ -151,7 +155,7 @@ By part of speech:
 - **Phrases:** `de` is the dictionary form (`"eine Entscheidung treffen"`); the example marks the inflected parts.
 
 ### 4.3 Generating and checking the data
-1. Generate in batches of 100–200 words in rank order. Afterwards run `node tools/coverage.js` and make sure every frequent lemma it lists is either added or a deliberate skip (see `tools/SOURCES.md`).
+1. Generate in batches of 100–200 words. Run `node tools/order.js` (its report lists the Goethe A1/A2 words still missing, with where they would land) and `node tools/coverage.js` (frequent lemmas missing), and make sure every word they list is either added or a deliberate skip (see `tools/SOURCES.md`). Then `node tools/order.js --write`.
 2. `tools/validate.js` (part of `npm test`): unique ids; required fields per POS; every noun has an article and a plural / `null` / `pluralOnly`; every example has the right number of `[[…]]` markers; strong verbs have `forms`; no duplicate (de, pos, meaning); `groups` labels come from the known list; valid JSON.
 3. `tools/crosscheck.js`: compares every article and plural against a Wiktionary extract (gambolputty/german-nouns; kaikki.org is unreachable from the agent's machine) and every verb form and weak/strong flag against the Morphy verb dictionary (see `tools/SOURCES.md`). Resolve each disagreement: fix the word, or record why our value is right in `tools/crosscheck-resolved.json`. Set `check: true` on what you can't resolve. Pay attention to nouns whose article changes the meaning (der/das Teil, der/die See). `haben`/`sein` has no script source; the per-band review checks it.
 4. Once per band of 500: a **fresh subagent** that didn't generate the data reviews what scripts can't check: unnatural sentences, wrong or missing Dutch translations, missing `acceptAlso` alternatives, wrong `cognate` flags, missing `groups`. Ask it for real errors only. Fix them.
@@ -183,7 +187,9 @@ Each card has its own FSRS schedule. Cards for established words come rarely, so
 ## 6. Learning flow
 
 ### 6.1 Choosing new words
-- Next words in rank order, skipping `clozeOnly` words until Stage 4.
+- Next words in rank order, skipping `clozeOnly` words until Stage 4. A word that waits under one of the rules below keeps its place.
+- **Hard-word cap:** at most **4 hard new words a day** (fixed). Difficulty for a Dutch speaker is computed, not stored (`difficultyOf` in `session.js`): not a cognate +2 · false friend +2 · noun whose de/het doesn't predict der/die/das +1 · strong verb +1 · separable +1 · reflexive or with a fixed preposition/case +1 · phrase +1 · longer than 10 letters +1; 0–1 easy, 2–3 medium, 4+ hard. A hard word passed with Te makkelijk doesn't count. (Real use adds the true picture later: FSRS difficulty and lapses per word feed the Wankel list.)
+- **Word families:** a word with a `base` waits until the base word has been introduced.
 - Words queued with **"Leer dit als volgende"** go first, within the daily limit.
 - **Confusable-set rule:** skip a word that shares a `groups` label with a word introduced today or still in learning. It keeps its place (in practice: one weekday per day). A passed quick check (below) doesn't count as introduced.
 - **Levels:** level *n* is ranks (n−1)·100+1 … n·100, labelled with the most common CEFR `level` of its words ("Niveau 3 (A1)"). The current level is that of the next new word. Home shows it with "Te makkelijk?"; Instellingen → Niveaus lists every level with a checkbox to mark or unmark it (setting `easyLevels`).
@@ -294,7 +300,7 @@ Bottom tab bar, monochrome, three tabs: **Leren** · **Woorden** · **Instelling
 
 ### 10.3 Card layout
 1. **Context sentence** (18px, muted): Dutch sentence with the prompt word bold on production; German sentence with the target bold on recognition; German with a blank and the Dutch below on cloze. **Hidden by default** (owner request): a small "Toon zin" button sits in its fixed-height space, so the word doesn't move, and tapping it keeps the keyboard up. Once shown, it stays shown for that card's answer side (German sentence, plus the Dutch one under the lockup). The intro card always shows it; the setting "Voorbeeldzin altijd tonen" shows it everywhere. Cloze cards (Stage 4) need their sentence and always show it.
-2. **Word** (32px, bold) at the fixed position.
+2. **Word** (32px, bold) at the fixed position, with its `nlHint` small and muted underneath on the prompt side.
 3. **Info bar** (14px), **after reveal only**: forms, part of speech, audio button.
 
 ### 10.4 Lockups (revealed side)
@@ -394,6 +400,7 @@ One stage per session. Start each stage by planning it against this section, the
 - [x] Key row, audio after answering, gender colors, lockups, de/het and false-friend notes
 - [x] Home: due count, minutes, new words left
 - [x] `tools/simulate.js` and the 90-day report
+- [x] Owner feedback (v0.3.0): real CEFR levels (Goethe lists), learning order with everyday words first (`tools/order.js`), 138 new words (everyday core, 18 phrases), `nlHint` for shared prompts, hard-word cap, word families (`base`)
 - [x] Owner feedback (v0.2.1): levels of 100 words with "te makkelijk" per level, as quick checks (§6.1); example sentence behind "Toon zin" (§10.3); `simulate.js --easy N`
 
 *Done when:* `npm run check` passes · an e2e test introduces a new word, completes its learning steps and sees it graduate · the backup → reset → restore test is rerun with real FSRS cards and review-log entries, and confirms dates come back as dates and the same cards are due before and after · the simulation report has been shared with the owner and looks sensible · the owner has tried a full session on his phone.
@@ -403,7 +410,7 @@ One stage per session. Start each stage by planning it against this section, the
 - [ ] Woorden tab: Kopieer woorden, Recent / Gevestigd / Wankel, search, word detail with its actions
 - [ ] Meld fout + Meldingen list + Kopieer meldingen
 - [ ] Leeches; Home stats line; backup reminder
-- [ ] **Words 501–1,000** with the checks from §4.3
+- [ ] **Words 501–1,000** with the checks from §4.3 (v0.3.0 already put 138 words in 501–638: the A1/A2 words and phrases that the new order moved past 500; the Goethe A1/A2 words still missing come next, `node tools/order.js` lists them)
 
 *Done when:* `npm run check` passes (incl. copy-list format tests) · e2e: copy a word list, report a word, copy the reports · a test with a few hundred already-learned words and recognition cards switched back on shows new recognition cards stay within the daily cap · the simulation, rerun with recognition cards, still looks sensible.
 

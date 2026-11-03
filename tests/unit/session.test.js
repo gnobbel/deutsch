@@ -5,13 +5,14 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import {
   Session, WORD_FILES, pickNewWord, planToday, mcOptions, GAP, levels, currentLevel, levelOf, CHECKS_PER_DAY, LEVEL_SIZE,
+  difficultyOf, difficultyBand, HARD_PER_DAY,
 } from '../../session.js';
 import { Grade, State, newCard, rate, DEFAULT_SECONDS } from '../../srs.js';
 import { displayForm } from '../../grading.js';
 import { DEFAULT_SETTINGS } from '../../db.js';
 
 const NOW = new Date('2026-10-29T10:00:00+01:00');
-const W = (id, de, nl, o = {}) => ({ id, rank: id, level: 'A1', pos: 'adj', de, nl: [nl], acceptAlso: [], groups: [], showInitial: false, ...o });
+const W = (id, de, nl, o = {}) => ({ id, rank: id, level: 'A1', pos: 'adj', de, nl: [nl], acceptAlso: [], groups: [], showInitial: false, cognate: true, falseFriend: null, ...o });
 const base = [
   W(1, 'gut', 'goed'), W(2, 'klein', 'klein'), W(3, 'groß', 'groot'), W(4, 'neu', 'nieuw'), W(5, 'alt', 'oud'),
   W(6, 'Montag', 'maandag', { pos: 'noun', article: 'der', plural: 'Montage', groups: ['weekdays'] }),
@@ -321,4 +322,51 @@ test('"Ik had gelijk" on a missed quick check gives the new-word place back', as
   await s.flush();
   assert.equal(store.words.get(sc.word.id).tooEasy, true);
   assert.equal(store.cards.get(`${sc.word.id}:production`).step, null);
+});
+
+// ---------- difficulty and word families (§6.1) ----------
+
+test('difficulty for a Dutch speaker: cognates are easy, false friends and irregular non-cognates hard', () => {
+  const haus = W(1, 'Haus', 'huis', { pos: 'noun', article: 'das', nlArticle: 'het' });
+  const maedchen = W(2, 'Mädchen', 'meisje', { pos: 'noun', article: 'das', nlArticle: 'het', cognate: false });
+  const sonne = W(3, 'Sonne', 'zon', { pos: 'noun', article: 'die', nlArticle: 'de' });
+  const bekommen = W(4, 'bekommen', 'krijgen', { pos: 'verb', strong: true, cognate: false });
+  const fast = W(5, 'fast', 'bijna', { pos: 'adv', cognate: false, falseFriend: { nl: 'vast', note: '…' } });
+  const kind = W(6, 'Kind', 'kind', { pos: 'noun', article: 'das', nlArticle: 'het' });
+  const meer = W(7, 'Meer', 'zee', { pos: 'noun', article: 'das', nlArticle: 'de', cognate: false });
+  assert.deepEqual([haus, sonne, kind].map(difficultyOf), [0, 0, 0]);
+  assert.equal(difficultyOf(maedchen), 2);
+  assert.equal(difficultyOf(meer), 3, 'non-cognate + de/het mismatch (de zee → das Meer)');
+  assert.equal(difficultyOf(bekommen), 3);
+  assert.equal(difficultyOf(fast), 4);
+  assert.deepEqual([haus, maedchen, fast].map(difficultyBand), ['easy', 'medium', 'hard']);
+});
+
+const hardWord = (id) => W(id, `schwer${id}`, `moeilijk${id}`, { cognate: false, falseFriend: { nl: 'x', note: 'y' } });
+
+test(`hard-word cap: at most ${HARD_PER_DAY} hard new words a day; the next one waits and keeps its place`, () => {
+  const words = [...Array.from({ length: 6 }, (_, i) => hardWord(i + 1)), W(7, 'leicht', 'licht'), W(8, 'gut', 'goed')];
+  const ws = new Map(Array.from({ length: HARD_PER_DAY }, (_, i) => [i + 1, { wordId: i + 1, introducedOn: NOW, tooEasy: false }]));
+  assert.equal(pickNewWord(words, ws, new Map(), NOW).id, 7, 'an easy word comes first');
+  const tomorrow = new Date(NOW.getTime() + 864e5);
+  assert.equal(pickNewWord(words, ws, new Map(), tomorrow).id, 5, 'the next day the hard word is first again');
+  ws.set(4, { wordId: 4, introducedOn: NOW, tooEasy: true });
+  assert.equal(pickNewWord(words, ws, new Map(), NOW).id, 5, 'a hard word passed with Te makkelijk does not count');
+});
+
+test('word families: a word waits until its base word has been introduced', () => {
+  const words = [W(1, 'Fahrrad', 'fiets', { base: 2 }), W(2, 'fahren', 'rijden'), W(3, 'gut', 'goed')];
+  assert.equal(pickNewWord(words, new Map(), new Map(), NOW).id, 2, 'Fahrrad waits for fahren');
+  const ws = new Map([[2, { wordId: 2, introducedOn: new Date('2026-10-01') }]]);
+  assert.equal(pickNewWord(words, ws, new Map(), NOW).id, 1);
+  assert.equal(pickNewWord([W(1, 'Fahrrad', 'fiets', { base: 99 })], new Map(), new Map(), NOW).id, 1, 'a base not in the data does not block');
+});
+
+test('the real word data: every base exists, and the order puts it first', () => {
+  const words = WORD_FILES.flatMap((f) => JSON.parse(readFileSync(f, 'utf8')));
+  const byId = new Map(words.map((w) => [w.id, w]));
+  for (const w of words.filter((x) => x.base != null)) {
+    assert.ok(byId.has(w.base), `${w.de}: base ${w.base}`);
+    assert.ok(byId.get(w.base).rank < w.rank, `${w.de} after ${byId.get(w.base).de}`);
+  }
 });

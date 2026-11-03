@@ -202,6 +202,7 @@ button.icon + button.icon { margin-top: 0; }
 }
 .card .word { font-size: 32px; font-weight: 700; line-height: 1.2; margin: 12px 0 8px; overflow-wrap: anywhere; }
 .card .hint, .card .message { font-size: 15px; margin: 4px 0 0; }
+.card .nl-hint { font-size: 17px; color: var(--muted); margin: -4px 0 4px; }
 .card .message { font-weight: 700; }
 .card .example-nl { font-size: 15px; margin: 8px 0 4px; }
 .note-line { font-size: 15px; margin: 6px 0 0; }

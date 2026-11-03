@@ -58,6 +58,16 @@ export function promptWord(word) {
   return word.pos === 'noun' && word.nlArticle ? `${word.nlArticle} ${nl}` : nl;
 }
 
+// The small Dutch hint that tells two words with the same prompt apart: "waar (plaats)".
+export function promptHint(word) {
+  return word.nlHint ? h('p', { class: 'nl-hint', id: 'nlHint' }, `(${word.nlHint})`) : null;
+}
+
+// "Verwant met: fahren" on the answer side of a word that builds on another (§6.1 word families).
+export function relatedNote(baseWord) {
+  return baseWord ? h('p', { class: 'note-line muted' }, S.session.related(baseWord.de)) : null;
+}
+
 // German example with the target in bold (the [[…]] markers).
 export function germanSentence(word) {
   const parts = word.example.de.split(/\[\[|\]\]/);

@@ -1,7 +1,9 @@
 // Routing, screens and glue.
 import { openDb } from './db.js';
 import { S, formatDate } from './strings.nl.js';
-import { h, lockup, promptWord, germanSentence, dutchSentence, deHetNote, falseFriendNote, infoBar, genderClass, spoken } from './cards.js';
+import {
+  h, lockup, promptWord, promptHint, relatedNote, germanSentence, dutchSentence, deHetNote, falseFriendNote, infoBar, genderClass, spoken,
+} from './cards.js';
 import { Session, WORD_FILES, planToday, levels, currentLevel, levelOf } from './session.js';
 import { secondsPerCard, estimateMinutes } from './srs.js';
 import { grade, diffParts } from './grading.js';
@@ -294,9 +296,10 @@ function card({ label, sentence, screen = null, word, revealed = null, extra = [
     extra);
 }
 
-// The Dutch word, and the Dutch sentence when the sentence is shown.
+// The Dutch word (with its hint), and the Dutch sentence when the sentence is shown.
 function exampleLine(word, withSentence) {
-  return h('p', { class: 'example-nl muted', id: 'exampleNl' }, promptWord(word), withSentence && ` — ${word.example.nl}`);
+  return h('p', { class: 'example-nl muted', id: 'exampleNl' }, promptWord(word), word.nlHint && ` (${word.nlHint})`,
+    withSentence && ` — ${word.example.nl}`);
 }
 
 function wordDetails(word, screen = null) {
@@ -304,6 +307,7 @@ function wordDetails(word, screen = null) {
     exampleLine(word, sentenceShown(screen)),
     deHetNote(word),
     falseFriendNote(word),
+    relatedNote(word.base != null ? session?.wordsById.get(word.base) : null),
     infoBar(word, sayNow(word)),
   ];
 }
@@ -346,7 +350,7 @@ function renderChoice(screen) {
   quietFor(word);
   show(
     sessionHeader(),
-    card({ label: T.chooseLabel, sentence: () => dutchSentence(word), screen, word: promptWord(word) }),
+    card({ label: T.chooseLabel, sentence: () => dutchSentence(word), screen, word: promptWord(word), extra: [promptHint(word)] }),
     h('div', { class: 'choices bottom' }, screen.options.map((o, i) => h('button', {
       class: 'choice',
       onclick: () => {
@@ -394,6 +398,7 @@ function renderTyping(screen, { message = null } = {}) {
       screen,
       word: promptWord(word),
       extra: [
+        promptHint(word),
         screen.hint && h('p', { class: 'hint', id: 'hint' }, T.startsWith(screen.hint)),
         message && h('p', { class: 'message', id: 'message', role: 'status' }, message),
       ],

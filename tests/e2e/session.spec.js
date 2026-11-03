@@ -209,13 +209,16 @@ test('the sentence can be switched on for every card in Instellingen', async ({ 
 });
 
 test('a level marked too easy: its words come as quick checks instead of new words', async ({ page }) => {
+  const learnable = words.filter((w) => !w.clozeOnly);
+  const inLevel = (n) => learnable.filter((w) => Math.ceil(w.rank / 100) === n).length;
+  const [one, two] = [inLevel(1), inLevel(2)];
   await openApp(page);
-  await expect(page.locator('#level')).toHaveText('Niveau 1 (A1) · 0 van 87 woorden gehad');
+  await expect(page.locator('#level')).toHaveText(`Niveau 1 (A1) · 0 van ${one} woorden gehad`);
   await page.locator('#levelEasy').click();
   await page.getByRole('button', { name: 'Ja, te makkelijk' }).click();
-  await expect(page.locator('#level')).toHaveText('Niveau 2 (A1) · 0 van 100 woorden gehad');
+  await expect(page.locator('#level')).toHaveText(`Niveau 2 (A1) · 0 van ${two} woorden gehad`);
   await expect(page.locator('#checksToday')).toHaveText('Snelle checks vandaag: 30');
-  await expect(page.locator('#newLeft')).toContainText('Nog 400 nieuwe woorden in de app. Nog 87 woorden om snel te checken.');
+  await expect(page.locator('#newLeft')).toContainText(`Nog ${learnable.length - one} nieuwe woorden in de app. Nog ${one} woorden om snel te checken.`);
   await page.screenshot({ path: 'test-results/screens/home-level.png' });
 
   await page.getByRole('button', { name: 'Start' }).click();
@@ -257,6 +260,34 @@ test('a level marked too easy: its words come as quick checks instead of new wor
   await page.locator('#level1').uncheck();
   await waitForSetting(page, 'easyLevels', []);
   await page.getByRole('link', { name: 'Leren' }).click();
-  await expect(page.locator('#level')).toContainText('Niveau 1 (A1) · 2 van 87 woorden gehad');
+  await expect(page.locator('#level')).toContainText(`Niveau 1 (A1) · 2 van ${one} woorden gehad`);
   await expect(page.locator('#checksToday')).toHaveCount(0);
+});
+
+test('two words with the same Dutch prompt are told apart by a small hint', async ({ page }) => {
+  // "waar" is the prompt of both wo (plaats) and wahr (juist). wahr is stored in its first typing
+  // step, the way an unfinished word is, so the session starts with it.
+  await openApp(page);
+  const wahr = words.find((w) => w.de === 'wahr');
+  await page.evaluate((id) => new Promise((resolve) => {
+    const r = indexedDB.open('deutsch');
+    r.onsuccess = () => {
+      const tx = r.result.transaction(['cards', 'words'], 'readwrite');
+      const now = new Date();
+      tx.objectStore('words').put({ wordId: id, introducedOn: now, tooEasy: false, knownMarked: false, queuedNext: false, accepted: [] });
+      tx.objectStore('cards').put({
+        id: `${id}:production`, wordId: id, type: 'production', suspended: false, step: 'type1', leech: false,
+        fsrs: { due: now, stability: 0, difficulty: 0, elapsed_days: 0, scheduled_days: 0, learning_steps: 0, reps: 0, lapses: 0, state: 0, last_review: null },
+      });
+      tx.oncomplete = () => { r.result.close(); resolve(); };
+    };
+  }), wahr.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('#word')).toHaveText('waar');
+  await expect(page.locator('#nlHint')).toHaveText('(juist)');
+  await page.screenshot({ path: 'test-results/screens/session-hint.png' });
+  await page.locator('#answer').fill('wahr');
+  await page.locator('#answer').press('Enter');
+  await expect(page.locator('#exampleNl')).toContainText('waar (juist)');
 });
