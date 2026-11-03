@@ -16,30 +16,92 @@ export const GAP = { type1: 3, type2: 8, mcAgain: 3, typeMiss: 2, relearn: 5 };
 export const LEARN_STEPS = ['intro', 'mc', 'type1', 'type2', 'tooEasy'];
 const STEPS_LEFT = { intro: 4, tooEasy: 4, mc: 3, type1: 2, type2: 1, relearn: 1 };
 
-// ---------- choosing new words (§6.1) ----------
+// ---------- levels (§6.1) ----------
 
-// A word counts toward today's limit when it was introduced today, unless it passed Te makkelijk.
-export function countsTowardLimit(ws, now) {
-  return !!ws?.introducedOn && dayKey(ws.introducedOn) === dayKey(now) && !ws.tooEasy;
+// Words are grouped by frequency rank into levels of 100: level 1 is ranks 1–100, and so on.
+export const LEVEL_SIZE = 100;
+// A word from a level marked "te makkelijk" isn't introduced as a new word; it gets one quick
+// typed check instead, at most this many a day (a fixed number, not a setting).
+export const CHECKS_PER_DAY = 30;
+
+export const levelOf = (w) => Math.max(1, Math.ceil(w.rank / LEVEL_SIZE));
+const easySet = (settings) => new Set(settings?.easyLevels || []);
+
+// Every level in the data, with how many of its words have been seen. `cefr` is the most common
+// `level` label among its words.
+export function levels(words, wordStates, easyLevels = []) {
+  const easy = new Set(easyLevels);
+  const byLevel = new Map();
+  for (const w of words) {
+    if (w.clozeOnly) continue;
+    const n = levelOf(w);
+    const l = byLevel.get(n) || { level: n, from: (n - 1) * LEVEL_SIZE + 1, to: n * LEVEL_SIZE, total: 0, seen: 0, labels: {} };
+    l.total++;
+    if (wordStates.get(w.id)?.introducedOn) l.seen++;
+    if (w.level) l.labels[w.level] = (l.labels[w.level] || 0) + 1;
+    byLevel.set(n, l);
+  }
+  return [...byLevel.values()].sort((a, b) => a.level - b.level).map(({ labels, ...l }) => ({
+    ...l, cefr: Object.entries(labels).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null, easy: easy.has(l.level),
+  }));
 }
 
-export const isNewCandidate = (w, ws) => !w.clozeOnly && !ws?.introducedOn;
+// The level new words come from now: that of the first word still to be introduced.
+export function currentLevel(words, wordStates, easyLevels = []) {
+  const easy = new Set(easyLevels);
+  const next = [...words].sort((a, b) => a.rank - b.rank).find((w) => isNewCandidate(w, wordStates.get(w.id), easy));
+  return next ? levelOf(next) : null;
+}
 
-export function newWordsLeft(words, wordStates) {
-  return words.filter((w) => isNewCandidate(w, wordStates.get(w.id))).length;
+// ---------- choosing new words (§6.1) ----------
+
+// A word counts toward today's limit when it was introduced today, unless it passed Te makkelijk
+// or its quick check (a failed check is a new word to learn, so it counts).
+export function countsTowardLimit(ws, now) {
+  return !!ws?.introducedOn && dayKey(ws.introducedOn) === dayKey(now) && !ws.tooEasy && (!ws.levelCheck || !!ws.checkMissed);
+}
+
+const unseen = (w, ws) => !w.clozeOnly && !ws?.introducedOn;
+export const isNewCandidate = (w, ws, easy = new Set()) => unseen(w, ws) && !easy.has(levelOf(w));
+export const isCheckCandidate = (w, ws, easy = new Set()) => unseen(w, ws) && easy.has(levelOf(w));
+
+export function newWordsLeft(words, wordStates, easy = new Set()) {
+  return words.filter((w) => isNewCandidate(w, wordStates.get(w.id), easy)).length;
+}
+
+export function checksLeft(words, wordStates, easy = new Set()) {
+  return words.filter((w) => isCheckCandidate(w, wordStates.get(w.id), easy)).length;
+}
+
+// Group labels of words still in a learning step.
+function learningGroups(words, cards, extraBusy = new Set()) {
+  const busy = new Set(extraBusy);
+  for (const c of cards.values()) if (LEARN_STEPS.includes(c.step)) busy.add(c.wordId);
+  const blocked = new Set();
+  for (const w of words) if (busy.has(w.id)) for (const g of w.groups) blocked.add(g);
+  return blocked;
 }
 
 // Confusable-set rule: a word that shares a `groups` label with a word introduced today or still
 // in learning waits (it keeps its place). Words queued with "Leer dit als volgende" go first.
-export function pickNewWord(words, wordStates, cards, now) {
+// A passed quick check doesn't count as introduced: that word was already known.
+export function pickNewWord(words, wordStates, cards, now, easy = new Set()) {
   const today = dayKey(now);
-  const busy = new Set();
-  for (const c of cards.values()) if (LEARN_STEPS.includes(c.step)) busy.add(c.wordId);
-  for (const ws of wordStates.values()) if (ws.introducedOn && dayKey(ws.introducedOn) === today) busy.add(ws.wordId);
-  const blocked = new Set();
-  for (const w of words) if (busy.has(w.id)) for (const g of w.groups) blocked.add(g);
-  const free = (w) => isNewCandidate(w, wordStates.get(w.id)) && !w.groups.some((g) => blocked.has(g));
+  const introduced = new Set();
+  for (const ws of wordStates.values()) {
+    if (ws.introducedOn && dayKey(ws.introducedOn) === today && !(ws.levelCheck && ws.tooEasy)) introduced.add(ws.wordId);
+  }
+  const blocked = learningGroups(words, cards, introduced);
+  const free = (w) => isNewCandidate(w, wordStates.get(w.id), easy) && !w.groups.some((g) => blocked.has(g));
   return words.find((w) => free(w) && wordStates.get(w.id)?.queuedNext) || words.find(free) || null;
+}
+
+// The next quick check from a level marked too easy, in rank order. Only words still in learning
+// block a confusable one: a check that passes was known already, so it can't cause a mix-up.
+export function pickCheckWord(words, wordStates, cards, easy) {
+  if (!easy.size) return null;
+  const blocked = learningGroups(words, cards);
+  return words.find((w) => isCheckCandidate(w, wordStates.get(w.id), easy) && !w.groups.some((g) => blocked.has(g))) || null;
 }
 
 // ---------- today's plan, shared by Home and the session (§8.2) ----------
@@ -56,10 +118,14 @@ export function planToday({ words, wordStates, cards, settings, seconds, now }) 
   const reviews = applySiblingsRule(due, all, now);
   const learning = all.filter((c) => !c.suspended && (LEARN_STEPS.includes(c.step) || c.step === 'relearn'));
   const paused = newWordsPaused(reviews, seconds);
+  const easy = easySet(settings);
   const usedToday = [...wordStates.values()].filter((ws) => countsTowardLimit(ws, now)).length;
-  const left = newWordsLeft(words, wordStates);
+  const left = newWordsLeft(words, wordStates, easy);
   const newToday = paused ? 0 : Math.max(0, Math.min(settings.newPerDay - usedToday, left));
-  return { reviews, learning, paused, newToday, newLeft: left, usedToday };
+  const checksUsed = [...wordStates.values()].filter((ws) => ws.levelCheck && ws.introducedOn && dayKey(ws.introducedOn) === dayKey(now)).length;
+  const checkLeft = checksLeft(words, wordStates, easy);
+  const checksToday = paused ? 0 : Math.max(0, Math.min(CHECKS_PER_DAY - checksUsed, checkLeft));
+  return { reviews, learning, paused, newToday, newLeft: left, usedToday, checksToday, checksLeft: checkLeft };
 }
 
 // ---------- multiple choice (§6.2 step 2) ----------
@@ -122,17 +188,23 @@ export class Session {
     this.pending = Promise.resolve();
     const plan = planToday({ words: this.words, wordStates: this.wordStates, cards: this.cards, settings, seconds, now: now() });
     this.reviews = plan.reviews.map((c) => ({ kind: 'review', cardId: c.id, step: 'review' }));
-    // Unfinished words continue first; a Te-makkelijk card that was cut off shows its intro again.
-    this.learning = plan.learning.map((c) => ({
-      kind: c.step === 'relearn' ? 'relearn' : 'learn', cardId: c.id, step: c.step === 'tooEasy' ? 'intro' : c.step, after: null, readyAt: 0,
-    }));
+    // Unfinished words continue first; a Te-makkelijk card that was cut off shows its intro again,
+    // a quick check that was cut off comes back as a check.
+    this.learning = plan.learning.map((c) => {
+      const check = c.step === 'tooEasy' && !!this.wordStates.get(c.wordId)?.levelCheck;
+      return {
+        kind: c.step === 'relearn' ? 'relearn' : 'learn', cardId: c.id, step: c.step === 'tooEasy' && !check ? 'intro' : c.step, after: null, readyAt: 0, check,
+      };
+    });
+    this.easy = easySet(settings);
     this.newRemaining = plan.newToday;
+    this.checkRemaining = plan.checksToday;
     this.paused = plan.paused;
     this.shown = 0;
     this.reviewsSinceNew = 0;
     this.current = null;
     this.last = null;
-    this.stats = { done: 0, ms: 0, newWords: 0, reviews: 0 };
+    this.stats = { done: 0, ms: 0, newWords: 0, reviews: 0, checks: 0 };
   }
 
   // Queues a write; returns a promise of its result (undefined if it failed).
@@ -148,7 +220,7 @@ export class Session {
 
   // Count-based progress for the bar.
   progress() {
-    const left = this.reviews.length + this.newRemaining * STEPS_LEFT.intro
+    const left = this.reviews.length + this.checkRemaining + this.newRemaining * STEPS_LEFT.intro
       + this.learning.reduce((s, i) => s + (STEPS_LEFT[i.step] || 1), 0) + (this.current ? 1 : 0);
     return this.shown / Math.max(1, this.shown + left);
   }
@@ -170,12 +242,16 @@ export class Session {
   pickItem() {
     const ready = this.learning.filter((i) => i.readyAt <= this.shown).sort((a, b) => a.readyAt - b.readyAt);
     if (ready.length) return ready[0];
-    const wantNew = this.newRemaining > 0 && (this.reviews.length === 0 || this.reviewsSinceNew >= REVIEWS_PER_NEW);
+    // Quick checks come after the reviews and, like reviews, have a new word after every 4.
+    const checkWord = this.checkRemaining > 0 ? pickCheckWord(this.words, this.wordStates, this.cards, this.easy) : null;
+    const filler = this.reviews.length > 0 || !!checkWord;
+    const wantNew = this.newRemaining > 0 && (!filler || this.reviewsSinceNew >= REVIEWS_PER_NEW);
     if (wantNew) {
       const item = this.introduceNext();
       if (item) return item;
     }
     if (this.reviews.length) return this.reviews.shift();
+    if (checkWord) return this.introduceCheck(checkWord);
     // Near the end: nothing else left, so a waiting step comes now.
     if (this.learning.length) return [...this.learning].sort((a, b) => a.readyAt - b.readyAt)[0];
     return null;
@@ -183,7 +259,7 @@ export class Session {
 
   introduceNext() {
     const now = this.now();
-    const w = pickNewWord(this.words, this.wordStates, this.cards, now);
+    const w = pickNewWord(this.words, this.wordStates, this.cards, now, this.easy);
     if (!w) return null;
     this.newRemaining--;
     this.reviewsSinceNew = 0;
@@ -193,6 +269,19 @@ export class Session {
     this.saveCard(newCard(w.id, 'production', now));
     this.stats.newWords++;
     const item = { kind: 'learn', cardId: `${w.id}:production`, step: 'intro', after: null, readyAt: 0 };
+    this.learning.push(item);
+    return item;
+  }
+
+  // A quick check: no intro, straight to one typed answer (like Te makkelijk).
+  introduceCheck(w) {
+    const now = this.now();
+    this.checkRemaining--;
+    const ws = { knownMarked: false, queuedNext: false, accepted: [], ...this.wordStates.get(w.id), wordId: w.id, introducedOn: now, tooEasy: false, levelCheck: true };
+    this.putWord(ws);
+    this.saveCard({ ...newCard(w.id, 'production', now), step: 'tooEasy' });
+    this.stats.checks++;
+    const item = { kind: 'learn', cardId: `${w.id}:production`, step: 'tooEasy', after: null, readyAt: 0, check: true };
     this.learning.push(item);
     return item;
   }
@@ -233,6 +322,7 @@ export class Session {
       this.reviewsSinceNew++;
       this.stats.reviews++;
     }
+    if (screen.item.check && screen.step === 'tooEasy') this.reviewsSinceNew++;
   }
 
   // Intro card: 'continue' or 'tooEasy'.
@@ -301,7 +391,17 @@ export class Session {
       }
     } else if (item.step === 'tooEasy') {
       if (result.outcome === 'correct') rated = this.passTooEasy(item, now);
-      else this.setStep(item, 'mc', this.shown);
+      else {
+        // A missed quick check is a new word to learn: it counts toward today's limit.
+        if (item.check) {
+          this.putWord({ ...this.wordStates.get(screen.word.id), checkMissed: true });
+          if (this.newRemaining > 0) {
+            this.newRemaining--;
+            item.chargedNew = true;
+          }
+        }
+        this.setStep(item, 'mc', this.shown);
+      }
     } else if (passed) {
       rated = this.passTyping(item, now);
     } else {
@@ -323,8 +423,13 @@ export class Session {
   }
 
   passTooEasy(item, now) {
-    this.putWord({ ...this.wordStates.get(this.cards.get(item.cardId).wordId), tooEasy: true });
-    this.newRemaining++; // Te makkelijk doesn't count toward the daily limit.
+    this.putWord({ ...this.wordStates.get(this.cards.get(item.cardId).wordId), tooEasy: true, checkMissed: false });
+    // Te makkelijk doesn't count toward the daily limit; a quick check never took a place in it.
+    if (!item.check) this.newRemaining++;
+    else if (item.chargedNew) {
+      this.newRemaining++;
+      item.chargedNew = false;
+    }
     return this.graduate(item, Grade.Easy, now);
   }
 

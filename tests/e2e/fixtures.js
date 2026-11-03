@@ -40,7 +40,7 @@ export async function waitForSetting(page, key, value) {
     const r = indexedDB.open('deutsch');
     r.onsuccess = () => {
       const g = r.result.transaction('settings').objectStore('settings').get(k);
-      g.onsuccess = () => { r.result.close(); resolve(g.result?.value === v); };
+      g.onsuccess = () => { r.result.close(); resolve(JSON.stringify(g.result?.value) === JSON.stringify(v)); };
     };
   }), [key, value]);
 }

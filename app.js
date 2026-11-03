@@ -2,7 +2,7 @@
 import { openDb } from './db.js';
 import { S, formatDate } from './strings.nl.js';
 import { h, lockup, promptWord, germanSentence, dutchSentence, deHetNote, falseFriendNote, infoBar, genderClass, spoken } from './cards.js';
-import { Session, WORD_FILES, planToday } from './session.js';
+import { Session, WORD_FILES, planToday, levels, currentLevel, levelOf } from './session.js';
 import { secondsPerCard, estimateMinutes } from './srs.js';
 import { grade, diffParts } from './grading.js';
 import { speak, stop as stopSpeech, germanVoices } from './tts.js';
@@ -150,12 +150,16 @@ async function renderHome() {
   const st = await loadState();
   if (token !== homeToken || session || currentTab() !== 'leren' || tabs.hidden) return;
   const T = S.home;
+  const wordStates = new Map(st.wordStates.map((w) => [w.wordId, w]));
   const plan = planToday({
-    words: st.words, wordStates: new Map(st.wordStates.map((w) => [w.wordId, w])), cards: new Map(st.cards.map((c) => [c.id, c])),
+    words: st.words, wordStates, cards: new Map(st.cards.map((c) => [c.id, c])),
     settings: st.settings, seconds: st.seconds, now: new Date(),
   });
-  const minutes = estimateMinutes([...plan.reviews, ...plan.learning], plan.newToday, st.seconds);
-  const work = plan.reviews.length + plan.learning.length + plan.newToday;
+  const minutes = estimateMinutes([...plan.reviews, ...plan.learning], plan.newToday, st.seconds, plan.checksToday);
+  const work = plan.reviews.length + plan.learning.length + plan.newToday + plan.checksToday;
+  const easyLevels = st.settings.easyLevels || [];
+  const cur = currentLevel(st.words, wordStates, easyLevels);
+  const level = cur && levels(st.words, wordStates, easyLevels).find((l) => l.level === cur);
   show(
     waitingWorker && h('button', { class: 'banner', id: 'update', onclick: applyUpdate },
       h('strong', {}, T.updateAvailable),
@@ -165,12 +169,28 @@ async function renderHome() {
       ? h('div', { class: 'today', id: 'today' },
         h('p', { class: 'big' }, T.reviews(plan.reviews.length), h('span', { class: 'muted' }, ` · ${T.minutes(minutes)}`)),
         h('p', {}, T.newToday(plan.newToday)),
+        plan.checksToday > 0 && h('p', { id: 'checksToday' }, T.checksToday(plan.checksToday)),
         plan.learning.length > 0 && h('p', { class: 'muted' }, T.inProgress(new Set(plan.learning.map((c) => c.wordId)).size)))
       : h('p', { class: 'big', id: 'today' }, T.allDone),
     plan.paused && h('p', { class: 'note' }, T.paused),
-    h('p', { class: 'muted small', id: 'newLeft' }, T.newLeft(plan.newLeft)),
+    h('p', { class: 'muted small', id: 'newLeft' }, T.newLeft(plan.newLeft), plan.checksLeft > 0 && ` ${T.checksLeft(plan.checksLeft)}`),
+    level && h('div', { class: 'level-row' },
+      h('span', { class: 'muted small', id: 'level' }, T.level(level)),
+      h('button', { class: 'link', id: 'levelEasy', type: 'button', onclick: () => markLevelEasy(level, easyLevels) }, T.levelTooEasy)),
     h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'start', disabled: !work, onclick: () => startSession(st) }, T.start)),
   );
+}
+
+// "Woorden op dit niveau zijn te makkelijk": its unseen words become quick checks (§6.1).
+async function markLevelEasy(level, easyLevels) {
+  const T = S.home;
+  const ok = await confirmDialog({
+    title: T.levelTitle(level.level), body: T.levelBody(level.level, level.total - level.seen), ok: T.levelOk,
+  });
+  if (!ok) return;
+  await db.setSetting('easyLevels', [...new Set([...easyLevels, level.level])].sort((a, b) => a - b));
+  toast(T.levelDone(level.level));
+  renderHome();
 }
 
 // ---------- the session (PLAN §6, §8.2, §10) ----------
@@ -246,18 +266,42 @@ function showScreen(screen) {
   return renderTyping(screen);
 }
 
+// Is the example sentence shown on this screen? Always on the intro card; elsewhere only with the
+// setting on, or after "Toon zin" (which stays on for the word's answer side).
+const sentenceShown = (screen) => !screen || sessionSettings.showSentence || !!screen.showSentence;
+
 // The card frame: context sentence, the word at a fixed position, then whatever follows.
-function card({ label, context, word, revealed = null, extra = [] }) {
+// When the sentence is hidden, a small "Toon zin" button takes its place, in the same fixed-height
+// space, so the word never moves (§10.1). Tapping it keeps the keyboard up.
+function card({ label, sentence, screen = null, word, revealed = null, extra = [], onSentence = null }) {
+  const context = h('p', { class: 'context', id: 'context' });
+  if (sentenceShown(screen)) context.append(sentence());
+  else {
+    context.append(h('button', {
+      class: 'sentence-btn', id: 'showSentence', type: 'button',
+      onpointerdown: (e) => e.preventDefault(),
+      onclick: () => {
+        screen.showSentence = true;
+        context.replaceChildren(sentence());
+        onSentence?.();
+      },
+    }, S.session.showSentence));
+  }
   return h('section', { class: `card${revealed ? ` revealed ${genderClass(revealed)}` : ''}` },
     h('p', { class: 'label' }, label || ' '),
-    h('p', { class: 'context' }, context),
+    context,
     h('div', { class: 'word', id: 'word' }, word),
     extra);
 }
 
-function wordDetails(word) {
+// The Dutch word, and the Dutch sentence when the sentence is shown.
+function exampleLine(word, withSentence) {
+  return h('p', { class: 'example-nl muted', id: 'exampleNl' }, promptWord(word), withSentence && ` — ${word.example.nl}`);
+}
+
+function wordDetails(word, screen = null) {
   return [
-    h('p', { class: 'example-nl muted' }, promptWord(word), ' — ', word.example.nl),
+    exampleLine(word, sentenceShown(screen)),
     deHetNote(word),
     falseFriendNote(word),
     infoBar(word, sayNow(word)),
@@ -275,8 +319,8 @@ function renderIntro(screen, { again = false } = {}) {
   show(
     sessionHeader(),
     card({
-      label: again ? T.wrong : T.newWord,
-      context: germanSentence(word),
+      label: again ? T.wrong : T.newWordLevel(levelOf(word)),
+      sentence: () => germanSentence(word),
       word: lockup(word),
       revealed: word,
       extra: [again && h('p', { class: 'message', role: 'status' }, T.mcWrong), ...wordDetails(word)],
@@ -302,7 +346,7 @@ function renderChoice(screen) {
   quietFor(word);
   show(
     sessionHeader(),
-    card({ label: T.chooseLabel, context: dutchSentence(word), word: promptWord(word) }),
+    card({ label: T.chooseLabel, sentence: () => dutchSentence(word), screen, word: promptWord(word) }),
     h('div', { class: 'choices bottom' }, screen.options.map((o, i) => h('button', {
       class: 'choice',
       onclick: () => {
@@ -332,16 +376,22 @@ function renderTyping(screen, { message = null } = {}) {
     if (!input.value.trim()) return;
     const typed = input.value;
     const r = session.answerTyped(screen, typed, elapsed());
-    if (r.outcome === 'different') return renderTyping(screen, { message: T.different });
+    if (r.outcome === 'different') {
+      // Another valid word: the sentence (and the first letter) help find the one we mean.
+      screen.showSentence = true;
+      return renderTyping(screen, { message: T.different });
+    }
     say(word);
     renderReveal(screen, r, typed);
   } }, input, h('button', { class: 'primary', type: 'submit' }, T.check));
-  const label = screen.step === 'tooEasy' ? T.tooEasyPrompt : screen.step === 'relearn' ? T.relearn : '';
+  const label = screen.step === 'tooEasy' ? (screen.item.check ? T.checkLabel(levelOf(word)) : T.tooEasyPrompt)
+    : screen.step === 'relearn' ? T.relearn : '';
   show(
     sessionHeader(),
     card({
       label,
-      context: dutchSentence(word),
+      sentence: () => dutchSentence(word),
+      screen,
       word: promptWord(word),
       extra: [
         screen.hint && h('p', { class: 'hint', id: 'hint' }, T.startsWith(screen.hint)),
@@ -390,14 +440,16 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
     sessionHeader(),
     card({
       label: head,
-      context: germanSentence(word),
+      sentence: () => germanSentence(word),
+      screen,
+      onSentence: () => document.getElementById('exampleNl')?.replaceWith(exampleLine(word, true)),
       word: lockup(word),
       revealed: word,
       extra: [
         overridden && h('p', { class: 'message', id: 'overridden', role: 'status' }, T.overridden(overridden)),
         shownAnswer,
         r.note && !overridden && h('p', { class: 'note-line' }, T.spelling(r.note)),
-        ...wordDetails(word),
+        ...wordDetails(word, screen),
       ],
     }),
     !ok && h('p', { class: 'small muted retype-label' }, T.retype),
@@ -424,12 +476,13 @@ function answerInput() {
 
 function renderDone() {
   const T = S.session;
-  const { done, ms, newWords } = session.stats;
+  const { done, ms, newWords, checks } = session.stats;
   hideKeyRow();
   show(
     h('h1', {}, T.doneTitle),
     h('p', { class: 'big', id: 'doneStats' }, T.doneStats(done, Math.max(done ? 1 : 0, Math.round(ms / 60000)))),
     newWords > 0 && h('p', { class: 'muted' }, T.doneNew(newWords)),
+    checks > 0 && h('p', { class: 'muted' }, T.doneChecks(checks)),
     h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'back', onclick: endSession }, T.back)),
   );
 }
@@ -482,8 +535,14 @@ const RETENTION_OPTIONS = [0.8, 0.85, 0.88, 0.9, 0.92, 0.95];
 
 async function renderSettings() {
   const T = S.settings;
-  const s = await db.getSettings();
-  const lastBackup = await db.getMeta('lastBackup');
+  const [s, lastBackup, words, wordStates] = await Promise.all([db.getSettings(), db.getMeta('lastBackup'), loadWords(), db.getAll('words')]);
+  if (currentTab() !== 'instellingen' || session) return;
+  const levelList = levels(words, new Map(wordStates.map((w) => [w.wordId, w])), s.easyLevels);
+  const setLevel = async (n, easy) => {
+    const cur = (await db.getSettings()).easyLevels || [];
+    const next = easy ? [...new Set([...cur, n])] : cur.filter((x) => x !== n);
+    await db.setSetting('easyLevels', next.sort((a, b) => a - b));
+  };
 
   const out = h('output', { id: 'newPerDay' }, String(s.newPerDay));
   const step = (d) => async () => {
@@ -513,7 +572,16 @@ async function renderSettings() {
           RETENTION_OPTIONS.map((r) => h('option', { value: r, selected: r === s.retention }, `${Math.round(r * 100)}%`)))),
       h('div', { class: 'row' }, h('label', { for: 'ignoreCase' }, T.ignoreCase), toggle('ignoreCase')),
       h('div', { class: 'row' }, h('label', { for: 'umlautShortcuts' }, T.umlautShortcuts), toggle('umlautShortcuts')),
+      h('div', { class: 'row' },
+        h('label', { for: 'showSentence' }, T.showSentence, h('span', { class: 'hint' }, T.showSentenceHint)), toggle('showSentence')),
     ),
+    h('h2', {}, T.levels),
+    h('p', { class: 'small muted' }, T.levelsHint),
+    h('div', { class: 'list', id: 'levels' }, levelList.map((l) => h('div', { class: 'row' },
+      h('label', { for: `level${l.level}` }, T.levelRow(l), h('span', { class: 'hint' }, T.levelRowHint(l))),
+      h('label', { class: 'level-toggle small muted' },
+        T.levelEasy,
+        h('input', { type: 'checkbox', id: `level${l.level}`, checked: l.easy, onchange: (e) => setLevel(l.level, e.target.checked) }))))),
     h('h2', {}, T.audio),
     h('div', { class: 'list' },
       h('div', { class: 'row' }, h('label', { for: 'audio' }, T.audioAuto), toggle('audio')),

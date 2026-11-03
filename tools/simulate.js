@@ -1,7 +1,8 @@
 // 90-day simulation of a learner (PLAN §8.1): runs the real session engine (session.js, srs.js,
 // grading.js) day by day and prints reviews, minutes and retention per week.
-//   node tools/simulate.js [--days 90] [--new 10] [--skip 0.14] [--seed 1] [--retention 0.9] [--penalty 0.04]
+//   node tools/simulate.js [--days 90] [--new 10] [--skip 0.14] [--seed 1] [--retention 0.9] [--penalty 0.04] [--easy 2]
 // --penalty: how much worse than FSRS's prediction the learner recalls (0 = exactly as predicted).
+// --easy N: levels 1–N are marked "te makkelijk" at the start, so their words come as quick checks.
 process.env.TZ ||= 'Europe/Amsterdam';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,14 +26,14 @@ export function rng(seed) {
 // The learner: recall follows FSRS's own prediction, made a little worse (real learners are
 // noisier than the model); typos now and then; time per card from typical typing speed.
 const LEARNER = {
-  tooEasy: 0.05, tooEasyRight: 0.7, mcRight: 0.95, learnRight: 0.85, typo: 0.06, relearnRight: 0.9,
+  tooEasy: 0.05, tooEasyRight: 0.7, checkRight: 0.9, mcRight: 0.95, learnRight: 0.85, typo: 0.06, relearnRight: 0.9,
   penalty: 0.04,
   ms: { intro: 15000, mc: 6000, type: 10000, correct: 9000, almost: 14000, wrong: 20000 },
 };
 
 const typo = (s) => (s.length > 5 ? s.slice(0, -2) + s.at(-1) + s.at(-2) : `${s}x`);
 
-export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed = 1, retention = 0.9, penalty = LEARNER.penalty, words } = {}) {
+export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed = 1, retention = 0.9, penalty = LEARNER.penalty, easyLevels = [], words } = {}) {
   const random = rng(seed);
   const store = { cards: new Map(), words: new Map(), log: [] };
   const memory = {
@@ -42,7 +43,7 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
     updateLog: (k, r) => { store.log[k] = r; },
     addReport: () => {},
   };
-  const settings = { ...DEFAULT_SETTINGS, newPerDay, retention };
+  const settings = { ...DEFAULT_SETTINGS, newPerDay, retention, easyLevels };
   const start = new Date(2026, 10, 2, 19, 0);
   const out = [];
   for (let d = 0; d < days; d++) {
@@ -74,7 +75,7 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
         let p;
         if (sc.step === 'review') p = Math.max(0, retrievability(sc.card, now(), retention) - penalty);
         else if (sc.step === 'relearn') p = LEARNER.relearnRight;
-        else if (sc.step === 'tooEasy') p = LEARNER.tooEasyRight;
+        else if (sc.step === 'tooEasy') p = sc.item.check ? LEARNER.checkRight : LEARNER.tooEasyRight;
         else p = LEARNER.learnRight;
         const right = random() < p;
         const slip = right && random() < LEARNER.typo;
@@ -93,6 +94,7 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
     }
     await s.flush();
     stat.newWords = s.stats.newWords;
+    stat.checks = s.stats.checks;
     out.push(stat);
   }
   const learned = [...store.cards.values()].filter((c) => c.step == null).length;
@@ -104,14 +106,15 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
 export function report(result, { words: wordCount, retention = 0.9, penalty = LEARNER.penalty }) {
   const lines = [];
   const pad = (v, n) => String(v).padStart(n);
-  lines.push('week  days  new/day  reviews/day  minutes/day  max min  retention');
+  const withChecks = result.days.some((d) => d.checks);
+  lines.push(`week  days  new/day${withChecks ? '  checks/day' : ''}  reviews/day  minutes/day  max min  retention`);
   for (let w = 0; w * 7 < result.days.length; w++) {
     const week = result.days.slice(w * 7, w * 7 + 7);
     const done = week.filter((d) => !d.skipped);
     const avg = (f) => (done.length ? done.reduce((s, d) => s + f(d), 0) / done.length : 0);
     const reviews = done.reduce((s, d) => s + d.reviews, 0);
     const correct = done.reduce((s, d) => s + d.correct, 0);
-    lines.push(`${pad(w + 1, 4)}  ${pad(done.length, 4)}  ${pad(avg((d) => d.newWords).toFixed(1), 7)}  ${pad(avg((d) => d.reviews).toFixed(0), 11)}  ${pad(avg((d) => d.ms / 60000).toFixed(0), 11)}  ${pad(Math.max(0, ...done.map((d) => d.ms / 60000)).toFixed(0), 7)}  ${reviews ? `${(100 * correct / reviews).toFixed(0)}%` : '-'}`);
+    lines.push(`${pad(w + 1, 4)}  ${pad(done.length, 4)}  ${pad(avg((d) => d.newWords).toFixed(1), 7)}${withChecks ? `  ${pad(avg((d) => d.checks).toFixed(1), 10)}` : ''}  ${pad(avg((d) => d.reviews).toFixed(0), 11)}  ${pad(avg((d) => d.ms / 60000).toFixed(0), 11)}  ${pad(Math.max(0, ...done.map((d) => d.ms / 60000)).toFixed(0), 7)}  ${reviews ? `${(100 * correct / reviews).toFixed(0)}%` : '-'}`);
   }
   const all = result.days.filter((d) => !d.skipped);
   const reviews = all.reduce((s, d) => s + d.reviews, 0);
@@ -146,8 +149,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (let i = 1; words.filter((w) => !w.clozeOnly).length < days * newPerDay * 1.2; i++) {
     words.push({ id: 100000 + i, rank: 10000 + i, pos: 'adj', de: `wort${i}`, nl: [`woord${i}`], acceptAlso: [], groups: [], showInitial: false });
   }
-  const result = await simulate({ days, newPerDay, skip: arg('skip', 1 / 7), seed: arg('seed', 1), retention: arg('retention', 0.9), penalty: arg('penalty', LEARNER.penalty), words });
-  console.log(`Simulation: ${days} days, ${newPerDay} new words a day, about 1 day in 7 skipped, desired retention ${arg('retention', 0.9)}, learner ${arg('penalty', LEARNER.penalty)} below FSRS's prediction`);
+  const easy = arg('easy', 0);
+  const easyLevels = Array.from({ length: easy }, (_, i) => i + 1);
+  const result = await simulate({ days, newPerDay, skip: arg('skip', 1 / 7), seed: arg('seed', 1), retention: arg('retention', 0.9), penalty: arg('penalty', LEARNER.penalty), easyLevels, words });
+  console.log(`Simulation: ${days} days, ${newPerDay} new words a day, about 1 day in 7 skipped, desired retention ${arg('retention', 0.9)}, learner ${arg('penalty', LEARNER.penalty)} below FSRS's prediction${easy ? `, levels 1–${easy} marked too easy` : ''}`);
   console.log(`(seconds per card defaults: ${JSON.stringify(DEFAULT_SECONDS)})\n`);
   console.log(report(result, { words: words.length, retention: arg('retention', 0.9), penalty: arg('penalty', LEARNER.penalty) }));
 }

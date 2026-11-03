@@ -115,7 +115,9 @@ export function secondsPerCard(log) {
   return out;
 }
 
-export function estimateMinutes(dueCards, newCount, seconds) {
-  const s = dueCards.reduce((sum, c) => sum + (seconds[c.type] ?? seconds.production), 0) + newCount * seconds.newWord;
+// A quick check (a word from a level marked too easy) takes about as long as a production review.
+export function estimateMinutes(dueCards, newCount, seconds, checkCount = 0) {
+  const s = dueCards.reduce((sum, c) => sum + (seconds[c.type] ?? seconds.production), 0) + newCount * seconds.newWord
+    + checkCount * seconds.production;
   return Math.ceil(s / 60);
 }

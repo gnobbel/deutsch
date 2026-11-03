@@ -2,7 +2,7 @@
 
 This is the spec. Read it before starting work. Keep it accurate: when a decision changes, edit the section it belongs to (no change log). Tick the stage checklists in §13 as items are finished, and keep the **Status** line current, because it is how the next session knows where things stand.
 
-**Status:** Stage 2 built and verified (v0.2.0); waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
+**Status:** Stage 2 built and verified (v0.2.0); owner feedback added in v0.2.1 (levels with "te makkelijk", example sentence behind "Toon zin"). Waiting for the owner to try a full session on his iPhone (last "Done when" check; Stage 1's install check is still open too). Next: Stage 3, first item.
 
 ---
 
@@ -39,7 +39,7 @@ Two or three sentences on what changed and what you decided on his behalf, then 
 - **The article is part of the word.** "der Handy" is a wrong answer.
 - **Spaced repetition (FSRS)** schedules everything.
 - **Most frequent words first**, but **confusable words are never introduced together** (same closed set, or opposites).
-- **Every word has an example sentence**, which also gives context on the prompt and enables cloze cards later.
+- **Every word has an example sentence**, which gives context on request ("Toon zin") and enables cloze cards later.
 - **Dutch-specific help:** flag false friends, and point out where Dutch de/het doesn't predict der/die/das. All hints and UI text are in Dutch.
 - **The learner can overrule the machine** ("Ik had gelijk", §7.5).
 - **Workload stays sustainable.** It's better to slow down new words than to build a review backlog.
@@ -67,6 +67,8 @@ Two or three sentences on what changed and what you decided on his behalf, then 
 - Verb forms: the present-tense stem change and the Perfekt; the Präteritum only for *sein*, *haben*, *werden* and the modal verbs.
 - German audio plays automatically after each answer.
 - UI language is Dutch.
+- **Levels (owner request, v0.2.1):** words are grouped into levels of 100 by rank; the owner can mark a level "te makkelijk", and its unseen words then come as one quick check each instead of as new words (§6.1).
+- **Example sentence hidden by default (owner request, v0.2.1):** cards show just the word, with a small "Toon zin" button; a setting shows it always (§10.3).
 
 ---
 
@@ -135,7 +137,7 @@ tools/sources/    – downloaded third-party files; gitignored
 - `nlArticle`: `"de"`, `"het"` or `null`.
 - `example.de`: a short, natural, level-appropriate sentence with the target marked `[[…]]` in its exact inflected form. Separable verbs get two markers: `Ich [[fange]] morgen [[an]].` `example.nl` is a natural translation; on the prompt it disambiguates the Dutch word.
 - `acceptAlso`: other German words valid for this Dutch prompt (target *schön*, prompt *mooi* → `["hübsch"]`; *bekommen* → `["kriegen", "erhalten"]`). **Fill this generously.** For every word, ask "what else might a learner reasonably type?" Common Dutch verbs are the worst cases (*kijken* → schauen/sehen/gucken). A correct answer marked wrong is the most likely daily annoyance.
-- `showInitial`: `true` when the sentence alone can't disambiguate the prompt; the prompt then shows the first letter.
+- `showInitial`: `true` when the sentence alone can't disambiguate the prompt; the prompt then shows the first letter. (The sentence is hidden until "Toon zin"; after a "different valid word" answer it is shown automatically, with the first letter.)
 - `falseFriend`: `null` or `{ "nl": "mist", "note": "Duits Mist = mest/rommel; Nederlands mist = Nebel" }` (in Dutch).
 - `cognate`: `true` if a Dutch speaker recognises the German word on sight (Haus, trinken, gut); `false` otherwise (bekommen, eigentlich, Mädchen). False friends are always `false`. Decides whether a recognition card is created.
 - `groups`: labels for **closed confusable sets** (`weekdays`, `months`, `numbers`, `colors`, `family`, `directions`…) and opposites (`opp:links-rechts`). Not for loose themes like "food". Allowed labels are listed in the validator.
@@ -183,7 +185,9 @@ Each card has its own FSRS schedule. Cards for established words come rarely, so
 ### 6.1 Choosing new words
 - Next words in rank order, skipping `clozeOnly` words until Stage 4.
 - Words queued with **"Leer dit als volgende"** go first, within the daily limit.
-- **Confusable-set rule:** skip a word that shares a `groups` label with a word introduced today or still in learning. It keeps its place (in practice: one weekday per day).
+- **Confusable-set rule:** skip a word that shares a `groups` label with a word introduced today or still in learning. It keeps its place (in practice: one weekday per day). A passed quick check (below) doesn't count as introduced.
+- **Levels:** level *n* is ranks (n−1)·100+1 … n·100, labelled with the most common CEFR `level` of its words ("Niveau 3 (A1)"). The current level is that of the next new word. Home shows it with "Te makkelijk?"; Instellingen → Niveaus lists every level with a checkbox to mark or unmark it (setting `easyLevels`).
+- **A level marked too easy:** its words that weren't introduced yet are no longer new words. Each comes **once as a quick check** instead: no intro, straight to one typed answer, like Te makkelijk. Correct → review with an Easy first rating, not counted toward the daily limit. Wrong → retype, then the normal learning steps; it then counts toward today's limit (it takes a place if one is left; a missed check is still learned when none is). At most **30 checks a day** (fixed), after due reviews, with a new word after every 4 like reviews; paused together with new words when reviews are overdue. A check cut off by the end of a session comes back as a check. Unmarking a level makes its remaining words new words again; words already checked keep their progress.
 
 ### 6.2 A new word in a session
 1. **Intro card:** Dutch word, German lockup (§10.4), example sentence (DE + NL), gender color and icon, audio, false-friend and de/het notes. Buttons: **Verder** · **Te makkelijk**.
@@ -257,7 +261,7 @@ Progress is saved after every answer, so stopping at any time loses nothing.
 - **Start:** due learning/relearning cards first, then due reviews (production → recognition → advanced cards; lowest retrievability first). **One new word after about every 4 reviews** until today's new words are done (immediately if nothing is due). Card types are interleaved. When everything is done: a short **"Klaar voor vandaag"** screen (cards done, time spent, button to copy today's words).
 - **Eindeloos** (Stage 4): after today's work, keep practising Shaky words and reviewing ahead. **Practice only, doesn't change schedules**, but misses make a word Shaky. Also a **"+5 nieuwe woorden"** button.
 - An exit button ends any session cleanly.
-- Home shows due cards and an estimate in minutes (median seconds per card type from the review log; defaults until there's data: production 12 s, recognition 6 s, cloze 15 s, plural 8 s, verbforms 20 s, new word 60 s).
+- Home shows due cards and an estimate in minutes (median seconds per card type from the review log; defaults until there's data: production 12 s, recognition 6 s, cloze 15 s, plural 8 s, verbforms 20 s, new word 60 s; a quick check counts as a production review).
 - **Reviews first:** if more than ~30 minutes of reviews are overdue, new words pause, with a one-line explanation on Home.
 
 ---
@@ -266,10 +270,10 @@ Progress is saved after every answer, so stopping at any time loses nothing.
 
 Bottom tab bar, monochrome, three tabs: **Leren** · **Woorden** · **Instellingen**. All text in `strings.nl.js`.
 
-- **Leren (Home):** due count + minutes, new words today, **Start** (and **Eindeloos** from Stage 4); a quiet stats line (words learned · reviews today · 30-day retention; no streaks); new words left in the data; backup reminder when the last backup is > 7 days old (dismissible for a day); "Update beschikbaar" when a new version is waiting. On first run: a short screen saying to add the app to the home screen first and only use it from there, and that deleting the icon deletes all progress.
+- **Leren (Home):** due count + minutes, new words today, quick checks today (if any), the current level with "Te makkelijk?" (§6.1), **Start** (and **Eindeloos** from Stage 4); a quiet stats line (words learned · reviews today · 30-day retention; no streaks); new words left in the data; backup reminder when the last backup is > 7 days old (dismissible for a day); "Update beschikbaar" when a new version is waiting. On first run: a short screen saying to add the app to the home screen first and only use it from there, and that deleting the icon deletes all progress.
 - **Session:** the card flow, a thin count-based progress bar, an exit button, an audio on/off toggle.
 - **Woorden** (Stage 3): **Kopieer woorden** at the top (§11.1); tabs **Recent** (introduced in the last 14 days) · **Gevestigd** (established) · **Wankel** (lapse in the last 14 days, ≥ 3 lapses, or missed in Endless; leeches badged); search across all words. **Word detail:** lockup, example, cards with state and next due date, and the actions suspend / reset / mark known / leer dit als volgende / meld fout. **Meldingen** section (§11.2).
-- **Instellingen:** daily new-word limit (with "≈ 20–30 min per dag na een paar maanden" next to it, from the simulation) · desired retention · recognition cards on/off · ignore capitalisation · umlaut shortcuts · audio voice, speed, auto-play · backup / restore · reset everything (double confirmation) · app version.
+- **Instellingen:** daily new-word limit (with "≈ 20–30 min per dag na een paar maanden" next to it, from the simulation) · desired retention · recognition cards on/off · ignore capitalisation · umlaut shortcuts · example sentence always shown (default off) · **Niveaus**: every level with a "te makkelijk" checkbox · audio voice, speed, auto-play · backup / restore · reset everything (double confirmation) · app version.
 
 ---
 
@@ -289,7 +293,7 @@ Bottom tab bar, monochrome, three tabs: **Leren** · **Woorden** · **Instelling
 - **de/het note** when Dutch het ↔ German not das, or Dutch de ↔ German das ("NL: het meisje → DE: das Mädchen", "NL: de zon → DE: die Sonne"). Shown on the intro and on every reveal of that noun.
 
 ### 10.3 Card layout
-1. **Context sentence** (18px, muted): Dutch sentence with the prompt word bold on production; German sentence with the target bold on recognition; German with a blank and the Dutch below on cloze.
+1. **Context sentence** (18px, muted): Dutch sentence with the prompt word bold on production; German sentence with the target bold on recognition; German with a blank and the Dutch below on cloze. **Hidden by default** (owner request): a small "Toon zin" button sits in its fixed-height space, so the word doesn't move, and tapping it keeps the keyboard up. Once shown, it stays shown for that card's answer side (German sentence, plus the Dutch one under the lockup). The intro card always shows it; the setting "Voorbeeldzin altijd tonen" shows it everywhere. Cloze cards (Stage 4) need their sentence and always show it.
 2. **Word** (32px, bold) at the fixed position.
 3. **Info bar** (14px), **after reveal only**: forms, part of speech, audio button.
 
@@ -339,9 +343,9 @@ There's no in-app editor. Instead:
 ### 12.1 IndexedDB stores
 - `cards`: `{ id: "214:production", wordId, type, fsrs, suspended: bool, step, leech }`. `step` is the session step the card is at (`intro`, `mc`, `type1`, `type2`, `tooEasy`, `relearn`) or null once it is in review; a new card's `fsrs.last_review` is stored as null instead of the library's undefined, which a JSON backup would drop. `fsrs` is the FSRS library's card object, stored whole and unchanged (state new/learning/review/relearning, stability, difficulty, due, last review, reps, lapses and any other fields the library keeps), so it always round-trips through the library. `suspended` is a separate flag: suspending never touches `fsrs`, so unsuspending restores the card exactly as it was.
 - `reviewLog`: `{ cardId, ts, grade, answer, ms, practice: bool, step, outcome }`. `step` is `intro`/`mc`/`type1`/`type2`/`tooEasy`/`review`/`relearn`; `grade` is null for steps that aren't rated (§8.1); `outcome` is the grading outcome (§7.2), `continue`/`tooEasy` on the intro, or `override` after "Ik had gelijk".
-- `words`: `{ wordId, introducedOn, tooEasy, knownMarked, queuedNext, accepted: [] }` (`accepted` holds answers allowed through "Ik had gelijk")
+- `words`: `{ wordId, introducedOn, tooEasy, knownMarked, queuedNext, accepted: [], levelCheck?, checkMissed? }` (`accepted` holds answers allowed through "Ik had gelijk"; `levelCheck` marks a word that came as a quick check from a level marked too easy, `checkMissed` that the check was answered wrong; a passed check also has `tooEasy: true`)
 - `reports`: `{ wordId, ts, kind: "override|report", answer, note }`
-- `settings`, `meta` (`schemaVersion`, `lastBackup`, `appVersion`, copy-list choice)
+- `settings` (incl. `easyLevels: []` and `showSentence: false`), `meta` (`schemaVersion`, `lastBackup`, `appVersion`, copy-list choice)
 - `snapshots`: the last 3 automatic snapshots (taken before migrations and imports)
 
 ### 12.2 Backup and restore
@@ -390,6 +394,7 @@ One stage per session. Start each stage by planning it against this section, the
 - [x] Key row, audio after answering, gender colors, lockups, de/het and false-friend notes
 - [x] Home: due count, minutes, new words left
 - [x] `tools/simulate.js` and the 90-day report
+- [x] Owner feedback (v0.2.1): levels of 100 words with "te makkelijk" per level, as quick checks (§6.1); example sentence behind "Toon zin" (§10.3); `simulate.js --easy N`
 
 *Done when:* `npm run check` passes · an e2e test introduces a new word, completes its learning steps and sees it graduate · the backup → reset → restore test is rerun with real FSRS cards and review-log entries, and confirms dates come back as dates and the same cards are due before and after · the simulation report has been shared with the owner and looks sensible · the owner has tried a full session on his phone.
 

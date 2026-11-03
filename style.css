@@ -163,6 +163,10 @@ dialog h3 { margin: 0 0 8px; font-size: 20px; }
 .big { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
 .big .muted { font-weight: 400; }
 .today p:not(.big) { margin-bottom: 4px; }
+.level-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }
+.level-row #level { flex: 1; }
+.level-row button.link { width: auto; flex: none; margin: 0; padding: 0 4px; font-size: 15px; }
+.level-toggle { display: flex; align-items: center; gap: 8px; flex: none !important; }
 
 /* ---------- Session (PLAN §10.3) ---------- */
 .session-head { display: flex; align-items: center; gap: 12px; margin: -8px 0 12px; }
@@ -191,6 +195,11 @@ button.icon + button.icon { margin-top: 0; }
   min-height: calc(3 * 1.45em); display: flex; align-items: flex-end;
 }
 .card .context b { color: var(--fg); }
+/* "Toon zin": small and quiet, in the sentence's own space. */
+.card .context button.sentence-btn {
+  width: auto; min-height: 36px; padding: 4px 12px; font-size: 15px; color: var(--muted);
+  border-radius: 999px; background: none;
+}
 .card .word { font-size: 32px; font-weight: 700; line-height: 1.2; margin: 12px 0 8px; overflow-wrap: anywhere; }
 .card .hint, .card .message { font-size: 15px; margin: 4px 0 0; }
 .card .message { font-weight: 700; }

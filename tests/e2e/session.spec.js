@@ -7,7 +7,8 @@ import { promptWord, spoken } from '../../cards.js';
 import { WORD_FILES } from '../../session.js';
 
 const words = WORD_FILES.flatMap((f) => JSON.parse(readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8')));
-// The prompt side shows the Dutch word and the Dutch sentence; together they identify the word.
+// The prompt side shows the Dutch word, and the Dutch sentence after "Toon zin"; together they
+// identify the word.
 const byPrompt = new Map(words.map((w) => [`${promptWord(w)}|${w.example.nl}`, w]));
 // On the revealed side the German sentence (markers removed) identifies it.
 const byGerman = new Map(words.map((w) => [w.example.de.replace(/\[\[|\]\]/g, ''), w]));
@@ -68,6 +69,9 @@ test('a first session: new words are introduced, practised and graduate', async 
   for (; steps < 120; steps++) {
     if (await page.getByRole('heading', { name: 'Klaar voor vandaag' }).isVisible()) break;
     const revealed = await page.locator('.card.revealed').count();
+    // The sentence is hidden behind "Toon zin" (except on the intro card); tapping it shows it.
+    const hidden = await page.locator('#showSentence').isVisible();
+    if (hidden) await page.locator('#showSentence').click();
     const context = (await page.locator('.card .context').textContent()).trim();
     const prompt = (await page.locator('#word').textContent()).trim();
 
@@ -78,6 +82,7 @@ test('a first session: new words are introduced, practised and graduate', async 
       if (introduced === 3) await page.locator('#tooEasy').click();
       else await page.locator('#next').click();
     } else if (await page.locator('.choices').isVisible()) {
+      expect(hidden, 'sentence hidden on the prompt').toBe(true);
       const w = byPrompt.get(`${prompt}|${context}`);
       expect(w, `word for ${prompt}`).toBeTruthy();
       await shot('choice');
@@ -91,6 +96,9 @@ test('a first session: new words are introduced, practised and graduate', async 
       }
       await page.locator('#answer').press('Enter');
     } else {
+      expect(hidden, 'sentence hidden on the prompt').toBe(true);
+      // "Toon zin" doesn't take the focus away from the answer field (the keyboard stays up).
+      await expect(page.locator('#answer')).toBeFocused();
       const w = byPrompt.get(`${prompt}|${context}`);
       expect(w, `word for ${prompt}`).toBeTruthy();
       // Nothing on the prompt side may hint at the answer (§1).
@@ -166,6 +174,7 @@ test('audio after an answer stops when the same word comes back as a prompt (§1
   await page.getByRole('button', { name: 'Start' }).click();
   await page.locator('#next').click(); // intro (spoken) → multiple choice
   const prompt = (await page.locator('#word').textContent()).trim();
+  await page.locator('#showSentence').click();
   const context = (await page.locator('.card .context').textContent()).trim();
   const w = byPrompt.get(`${prompt}|${context}`);
   await page.getByRole('button', { name: displayForm(w), exact: true }).click(); // spoken again → typing, same word
@@ -174,4 +183,80 @@ test('audio after an answer stops when the same word comes back as a prompt (§1
   expect(said).toContain(spoken(w));
   const speaking = await page.evaluate(() => window.__speech.filter((x) => x.active).map((x) => x.text));
   expect(speaking).not.toContain(spoken(w));
+});
+
+// Identifies the word on a prompt card via "Toon zin".
+async function promptedWord(page) {
+  const prompt = (await page.locator('#word').textContent()).trim();
+  if (await page.locator('#showSentence').isVisible()) await page.locator('#showSentence').click();
+  const context = (await page.locator('.card .context').textContent()).trim();
+  return byPrompt.get(`${prompt}|${context}`);
+}
+
+test('the sentence can be switched on for every card in Instellingen', async ({ page }) => {
+  await openApp(page);
+  await page.getByRole('link', { name: 'Instellingen' }).click();
+  await page.getByLabel('Voorbeeldzin altijd tonen').check();
+  await waitForSetting(page, 'showSentence', true);
+  await page.getByRole('link', { name: 'Leren' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await page.locator('#next').click(); // intro → multiple choice
+  await expect(page.locator('.choices')).toBeVisible();
+  await expect(page.locator('#showSentence')).toHaveCount(0);
+  const prompt = (await page.locator('#word').textContent()).trim();
+  const context = (await page.locator('.card .context').textContent()).trim();
+  expect(byPrompt.get(`${prompt}|${context}`), 'the Dutch sentence is shown').toBeTruthy();
+});
+
+test('a level marked too easy: its words come as quick checks instead of new words', async ({ page }) => {
+  await openApp(page);
+  await expect(page.locator('#level')).toHaveText('Niveau 1 (A1) · 0 van 87 woorden gehad');
+  await page.locator('#levelEasy').click();
+  await page.getByRole('button', { name: 'Ja, te makkelijk' }).click();
+  await expect(page.locator('#level')).toHaveText('Niveau 2 (A1) · 0 van 100 woorden gehad');
+  await expect(page.locator('#checksToday')).toHaveText('Snelle checks vandaag: 30');
+  await expect(page.locator('#newLeft')).toContainText('Nog 400 nieuwe woorden in de app. Nog 87 woorden om snel te checken.');
+  await page.screenshot({ path: 'test-results/screens/home-level.png' });
+
+  await page.getByRole('button', { name: 'Start' }).click();
+  // A check has no intro: straight to typing, labelled as a check.
+  await expect(page.locator('.card .label')).toHaveText('Snelle check · niveau 1');
+  const first = await promptedWord(page);
+  expect(first.rank).toBeLessThanOrEqual(100);
+  await page.screenshot({ path: 'test-results/screens/session-check.png' });
+  await page.locator('#answer').fill(displayForm(first));
+  await page.locator('#answer').press('Enter');
+  await expect(page.locator('.card .label')).toHaveText('Goed, dit woord zit erin');
+  await page.locator('#answer').press('Enter');
+
+  // The second one is missed: retype, and it becomes a word to learn.
+  await expect(page.locator('.card .label')).toHaveText('Snelle check · niveau 1');
+  const second = await promptedWord(page);
+  await page.locator('#answer').fill('xyzzy');
+  await page.locator('#answer').press('Enter');
+  await page.locator('#answer').fill(displayForm(second));
+  await page.locator('#answer').press('Enter');
+  await expect(page.locator('.choices')).toBeVisible(); // the normal learning steps, like a missed Te makkelijk
+  await page.getByRole('button', { name: 'Stoppen' }).click();
+
+  const db = await readIdb(page);
+  const card = (w) => db.cards.find((c) => c.wordId === w.id);
+  const ws = (w) => db.words.find((x) => x.wordId === w.id);
+  expect(card(first).step).toBeNull();
+  expect(card(first).fsrs.state).toBe(2); // review, rated Easy
+  expect(ws(first)).toMatchObject({ levelCheck: true, tooEasy: true });
+  expect(card(second).step).toBe('mc');
+  expect(ws(second)).toMatchObject({ levelCheck: true, tooEasy: false });
+  // The missed one counts as a new word today.
+  await expect(page.locator('#checksToday')).toHaveText('Snelle checks vandaag: 28');
+  await expect(page.locator('#today')).toContainText('Nieuwe woorden vandaag: 9');
+
+  // Undo in Instellingen → Niveaus.
+  await page.getByRole('link', { name: 'Instellingen' }).click();
+  await expect(page.locator('#level1')).toBeChecked();
+  await page.locator('#level1').uncheck();
+  await waitForSetting(page, 'easyLevels', []);
+  await page.getByRole('link', { name: 'Leren' }).click();
+  await expect(page.locator('#level')).toContainText('Niveau 1 (A1) · 2 van 87 woorden gehad');
+  await expect(page.locator('#checksToday')).toHaveCount(0);
 });
