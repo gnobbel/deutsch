@@ -10,8 +10,9 @@ import {
 // Every word file, in rank order (all of them are precached by sw.js).
 export const WORD_FILES = ['words/words-0001-0500.json', 'words/words-0501-1000.json', 'words/words-1001-1500.json', 'words/words-1501-2000.json'];
 
-// Herhalen: how many other cards come before a lapsed word's relearning step (§6.3).
-export const GAP = { relearn: 5 };
+// Herhalen: how many other cards come before a lapsed word's relearning step (§6.3). Leren: how
+// many other cards at least come between "Ken ik al" and its typed check (§6.2).
+export const GAP = { relearn: 5, check: 3 };
 // Learning steps stored on a card (§6.2): 'intro' = new, not asked yet (its first question is a
 // multiple choice); 'mc' = multiple choice; 'type1' = typed; 'tooEasy' = the typed check after
 // "Ken ik al". Test data from before v0.8.0 may hold 'type2': it counts as 'type1'.
@@ -37,6 +38,12 @@ export const EASY_STREAK = 5;
 
 export const levelOf = (w) => Math.max(1, Math.ceil(w.rank / LEVEL_SIZE));
 const easySet = (settings) => new Set(settings?.easyLevels || []);
+// The level Leren takes new words from: the chosen one, unless it was marked too easy since
+// (then the normal order again, §6.1).
+export const chosenLevel = (settings) => {
+  const l = settings?.learnLevel ?? null;
+  return l != null && !easySet(settings).has(l) ? l : null;
+};
 
 // Every level in the data, with how many of its words have been seen. `cefr` is the most common
 // `level` label among its words.
@@ -178,6 +185,7 @@ export function baseReady(w, wordStates, wordIds) {
 // - Hard-word cap and word families (above).
 // - `level`: only words of this level (the level chosen on Home), except words queued first.
 export function pickNewWord(words, wordStates, cards, now, easy = new Set(), level = null) {
+  const reach = level == null ? null : levelReach(words, wordStates, easy, level);
   const today = dayKey(now);
   const introduced = new Set();
   for (const ws of wordStates.values()) {
@@ -189,7 +197,40 @@ export function pickNewWord(words, wordStates, cards, now, easy = new Set(), lev
   const free = (w) => isNewCandidate(w, wordStates.get(w.id), easy) && !confusables(w).some((g) => blocked.has(g))
     && !(capped && isHard(w)) && baseReady(w, wordStates, wordIds);
   return words.find((w) => free(w) && wordStates.get(w.id)?.queuedNext)
-    || words.find((w) => free(w) && (level == null || levelOf(w) === level)) || null;
+    || words.find((w) => free(w) && (reach == null || reach.has(w.id))) || null;
+}
+
+// The words a chosen level can bring: its own new words, plus the base words they wait for
+// (Großvater in level 5 needs Vater from level 1 first, §6.1 word families), however far back.
+export function levelReach(words, wordStates, easy, level) {
+  const byId = new Map(words.map((w) => [w.id, w]));
+  const reach = new Set();
+  const todo = words.filter((w) => levelOf(w) === level && isNewCandidate(w, wordStates.get(w.id), easy)).map((w) => w.id);
+  while (todo.length) {
+    const id = todo.pop();
+    if (reach.has(id)) continue;
+    reach.add(id);
+    const b = byId.get(id).base;
+    if (b != null && byId.has(b) && !wordStates.get(b)?.introducedOn) todo.push(b);
+  }
+  return reach;
+}
+
+// How many new words a session could really introduce now, picking them one by one with every
+// rule (confusable sets, hard-word cap, word families, the chosen level), up to `max`. Home's
+// "Vandaag nog n nieuwe woorden" and the session use the same number.
+function newWordsInReach(words, wordStates, cards, now, easy, level, max) {
+  const ws = new Map(wordStates);
+  const cs = new Map(cards);
+  let n = 0;
+  while (n < max) {
+    const w = pickNewWord(words, ws, cs, now, easy, level);
+    if (!w) break;
+    ws.set(w.id, { ...ws.get(w.id), wordId: w.id, introducedOn: now, tooEasy: false, queuedNext: false });
+    cs.set(`${w.id}:production`, newCard(w.id, 'production', now));
+    n++;
+  }
+  return n;
 }
 
 // ---------- the quick scan of levels marked too easy (§6.1) ----------
@@ -236,11 +277,11 @@ export function planToday({ words, wordStates, cards, settings, seconds, now }) 
   const easy = easySet(settings);
   const usedToday = [...wordStates.values()].filter((ws) => countsTowardLimit(ws, now)).length;
   const left = newWordsLeft(words, wordStates, easy);
-  // With a level chosen on Home, new words come from that level (plus words queued first).
-  const level = settings.learnLevel ?? null;
-  const inReach = level == null ? left
-    : words.filter((w) => isNewCandidate(w, wordStates.get(w.id), easy) && (levelOf(w) === level || wordStates.get(w.id)?.queuedNext)).length;
-  const newToday = paused ? 0 : Math.max(0, Math.min(settings.newPerDay - usedToday, inReach));
+  // With a level chosen on Home, new words come from that level (plus words queued first and the
+  // base words they need); every rule is applied, so the number is what Leren can really give.
+  const level = chosenLevel(settings);
+  const sorted = [...words].sort((a, b) => a.rank - b.rank);
+  const newToday = paused ? 0 : newWordsInReach(sorted, wordStates, cards, now, easy, level, Math.max(0, Math.min(settings.newPerDay - usedToday, left)));
   // The scan adds reviews later, so it pauses together with new words.
   const toScan = scanLeft(words, wordStates, easy);
   const scanToday = paused ? 0 : Math.max(0, Math.min(SCANS_PER_DAY - scannedToday(wordStates, now), toScan));
@@ -258,7 +299,8 @@ export function levelProgress(words, cards, level) {
     if (w.clozeOnly || levelOf(w) !== level) continue;
     out.total++;
     const c = cards.get(`${w.id}:production`);
-    if (c && c.step == null && c.fsrs.state !== State.New) out.known++;
+    // A lapsed word waiting for its relearning step stays gekend.
+    if (c && (c.step == null || c.step === 'relearn') && c.fsrs.state !== State.New) out.known++;
     else if (c && LEARN_STEPS.includes(c.step)) out.learning++;
     else out.fresh++;
   }
@@ -358,8 +400,9 @@ export class Session {
       this.queue = plan.reviews.map((c) => ({ kind: 'review', cardId: c.id, step: 'review' }));
       this.learning = plan.relearn.map((c) => ({ kind: 'relearn', cardId: c.id, step: 'relearn', readyAt: 0 }));
     } else if (mode === 'learn') {
-      this.level = settings.learnLevel ?? null;
+      this.level = chosenLevel(settings);
       this.newRemaining = plan.newToday;
+      this.deferred = 0;
       // Unfinished words continue first (from any level).
       this.active = plan.learnNow.map((c) => ({ kind: 'learn', cardId: c.id, step: c.step === 'type2' ? 'type1' : c.step, after: null, done: false }));
       this.roundNo = 0;
@@ -397,6 +440,9 @@ export class Session {
 
   // A new round: words that became "gekend" leave, new words of the chosen level fill up to
   // ROUND_SIZE (within today's limit), and the order is shuffled (never the same word twice in a row).
+  // A "Ken ik al" check goes at the end of the round, and only when at least GAP.check other cards
+  // came since "Ken ik al"; otherwise it waits (for a later round, or the next session): typed
+  // straight after seeing the word it tests short-term memory (§6.2).
   startRound() {
     this.active = this.active.filter((i) => !i.done);
     while (this.active.length < ROUND_SIZE && this.newRemaining > 0) {
@@ -404,8 +450,15 @@ export class Session {
       if (!item) break;
       this.active.push(item);
     }
-    this.round = shuffled(this.active, this.random);
-    if (this.round.length > 1 && this.round[0] === this.lastItem) this.round.push(this.round.shift());
+    const others = shuffled(this.active.filter((i) => i.step !== 'tooEasy'), this.random);
+    if (others.length > 1 && others[0] === this.lastItem) others.push(others.shift());
+    const checks = [];
+    // Oldest "Ken ik al" first, so the most recent ones get the most cards in between.
+    for (const i of this.active.filter((x) => x.step === 'tooEasy').sort((a, b) => (a.askedAt ?? -1) - (b.askedAt ?? -1))) {
+      if (i.askedAt == null || this.shown - i.askedAt + others.length + checks.length >= GAP.check) checks.push(i);
+    }
+    this.round = [...others, ...checks];
+    this.deferred = this.active.length - this.round.length;
     this.roundNo++;
     this.roundSize = this.round.length;
     this.roundResults = [];
@@ -419,10 +472,11 @@ export class Session {
 
   // The round summary, once a round's words have all been asked.
   roundSummary() {
-    const active = this.active.filter((i) => !i.done).length;
+    // More to do: a word still to learn that isn't a check waiting for other cards, or new words.
+    const left = this.active.filter((i) => !i.done && !(i.step === 'tooEasy' && i.askedAt != null && this.shown - i.askedAt < GAP.check));
     return {
       step: 'round', round: this.roundNo, results: this.roundResults,
-      more: active > 0 || this.newRemaining > 0,
+      more: left.length > 0 || this.newRemaining > 0,
     };
   }
 
@@ -491,7 +545,8 @@ export class Session {
   // "Dit niveau lijkt te makkelijk" (§6.1), for the level of the word just answered. A word whose
   // Te makkelijk check hasn't come yet doesn't count.
   levelLooksEasy(level) {
-    const pending = new Set((this.active || []).filter((i) => i.step === 'tooEasy' && !i.done).map((i) => this.cards.get(i.cardId).wordId));
+    // (Also words picked for the round but not answered yet.)
+    const pending = new Set((this.active || []).filter((i) => !i.done && (i.step === 'tooEasy' || i.unsaved)).map((i) => this.cards.get(i.cardId).wordId));
     return levelLooksEasy(level, this.words, this.wordStates, [...this.easy], pending);
   }
 
@@ -557,6 +612,7 @@ export class Session {
     this.resolved(screen, ms);
     if (action === 'tooEasy') {
       this.setStep(screen.item, 'tooEasy');
+      screen.item.askedAt = this.shown;
       this.roundResults.push({ wordId: screen.word.id, ok: true, step: 'intro', known: true });
     }
     return { action };
@@ -665,9 +721,11 @@ export class Session {
   }
 
   passTooEasy(item, now) {
-    this.putWord({ ...this.wordStates.get(this.cards.get(item.cardId).wordId), tooEasy: true });
-    // Te makkelijk doesn't count toward the daily limit.
-    this.newRemaining++;
+    const ws = this.wordStates.get(this.cards.get(item.cardId).wordId);
+    // Te makkelijk doesn't count toward the daily limit: a word counted today gives its place back
+    // (a check left over from an earlier day never took one today).
+    if (countsTowardLimit(ws, now)) this.newRemaining++;
+    this.putWord({ ...ws, tooEasy: true });
     return this.graduate(item, Grade.Easy, now);
   }
 

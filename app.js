@@ -6,7 +6,7 @@ import {
 } from './cards.js';
 import {
   Session, WORD_FILES, planToday, levels, currentLevel, levelOf, levelLooksEasy, levelsBelow, startLevelOf, START_LEVELS,
-  scanBatch, applyScan, SCAN_PAGE, levelProgress, testCards,
+  scanBatch, applyScan, SCAN_PAGE, levelProgress, testCards, chosenLevel,
 } from './session.js';
 import { secondsPerCard, estimateMinutes } from './srs.js';
 import { grade, diffParts, displayForm } from './grading.js';
@@ -177,7 +177,7 @@ async function renderHome() {
   const easyLevels = st.settings.easyLevels || [];
   const levelList = levels(st.words, wordStates, easyLevels);
   // The level shown in the Leren block: the chosen one, or the one new words come from now.
-  const chosen = st.settings.learnLevel ?? null;
+  const chosen = chosenLevel(st.settings);
   const cur = chosen ?? currentLevel(st.words, wordStates, easyLevels);
   const level = cur && levelList.find((l) => l.level === cur);
   const progress = level && levelProgress(st.words, cards, level.level);
@@ -240,7 +240,7 @@ async function renderLevelPicker() {
   const wordStates = new Map(st.wordStates.map((w) => [w.wordId, w]));
   const cards = new Map(st.cards.map((c) => [c.id, c]));
   const easyLevels = st.settings.easyLevels || [];
-  const chosen = st.settings.learnLevel ?? null;
+  const chosen = chosenLevel(st.settings);
   picking = true;
   tabs.hidden = true;
   view.classList.add('full');
@@ -767,6 +767,7 @@ function renderDone() {
     h('p', { class: 'big', id: 'doneStats' }, T.doneStats(done, Math.max(done ? 1 : 0, Math.round(ms / 60000)))),
     newWords > 0 && h('p', { class: 'muted' }, T.doneNew(newWords)),
     session.mode === 'learn' && !done && h('p', { class: 'muted' }, T.learnDoneNone),
+    session.mode === 'learn' && session.deferred > 0 && h('p', { class: 'muted', id: 'deferred' }, T.learnDeferred(session.deferred)),
     back,
   );
 }

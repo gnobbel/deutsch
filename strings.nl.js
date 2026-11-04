@@ -93,6 +93,7 @@ export const S = {
     reviewDoneTitle: 'Klaar met herhalen',
     learnDoneTitle: 'Klaar voor vandaag',
     learnDoneNone: 'Geen nieuwe woorden meer voor vandaag. Morgen gaat het verder.',
+    learnDeferred: (n) => (n === 1 ? 'Eén woord dat je al kende, vragen we de volgende keer, met andere woorden ertussen.' : `${n} woorden die je al kende, vragen we de volgende keer, met andere woorden ertussen.`),
     testDoneTitle: 'Toets klaar',
     testScore: (ok, n) => `${ok} van ${n} goed`,
     testMissed: 'Deze nog oefenen:',
