@@ -139,6 +139,35 @@ test('a first session: new words are introduced, practised and graduate', async 
   await expect(page.locator('#tabs')).toBeVisible();
 });
 
+test('the "Goed ✓" of a multiple choice never sits on top of the next answer\'s feedback', async ({ page }) => {
+  // The toast's timer is made very long, as if the answer came within its 1.2 s: only the reveal
+  // may hide it.
+  await page.addInitScript(() => {
+    const later = window.setTimeout;
+    window.setTimeout = (fn, ms, ...args) => later(fn, ms >= 1000 && ms <= 3000 ? 600000 : ms, ...args);
+  });
+  await openApp(page);
+  await page.getByRole('button', { name: 'Start' }).click();
+  let sawToastBeforeTyping = false;
+  for (let steps = 0; steps < 30; steps++) {
+    if (await page.locator('#tooEasy').isVisible()) {
+      await page.locator('#next').click();
+    } else if (await page.locator('.choices').isVisible()) {
+      if (await page.locator('#showSentence').isVisible()) await page.locator('#showSentence').click();
+      const w = byPrompt.get(`${(await page.locator('#word').textContent()).trim()}|${(await page.locator('.card .context').textContent()).trim()}`);
+      await page.getByRole('button', { name: displayForm(w), exact: true }).click();
+    } else {
+      sawToastBeforeTyping = await page.locator('#toast').isVisible();
+      await page.locator('#answer').fill('xyzzy');
+      await page.locator('#answer').press('Enter');
+      await expect(page.locator('.card.revealed')).toBeVisible();
+      await expect(page.locator('#toast')).toBeHidden();
+      break;
+    }
+  }
+  expect(sawToastBeforeTyping, 'the toast was still up when the typing card came').toBe(true);
+});
+
 test('the session can be left at any time; an unfinished word continues next time', async ({ page }) => {
   await openApp(page);
   await page.getByRole('button', { name: 'Start' }).click();

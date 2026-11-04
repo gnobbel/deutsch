@@ -36,6 +36,12 @@ function toast(text, ms = 3000) {
   toastTimer = setTimeout(() => { toastEl.hidden = true; }, ms);
 }
 
+// A toast from the previous card ("Goed ✓") must not sit on top of the next answer's feedback.
+function hideToast() {
+  clearTimeout(toastTimer);
+  toastEl.hidden = true;
+}
+
 function confirmDialog({ title, body, ok, cancel = S.settings.cancel }) {
   return new Promise((resolve) => {
     const close = (v) => { dialog.close(); resolve(v); };
@@ -493,6 +499,7 @@ function renderTyping(screen, { message = null } = {}) {
     if (r.outcome === 'different') {
       // Another valid word: the sentence (and the first letter) help find the one we mean.
       screen.showSentence = true;
+      hideToast();
       return renderTyping(screen, { message: T.different });
     }
     say(word);
@@ -520,6 +527,7 @@ function renderTyping(screen, { message = null } = {}) {
 
 function renderReveal(screen, r, typed, { overridden = null } = {}) {
   const T = S.session;
+  hideToast();
   const { word } = screen;
   const ok = r.outcome === 'correct' || overridden;
   const head = overridden ? T.correct

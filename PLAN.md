@@ -296,6 +296,7 @@ Bottom tab bar, monochrome, three tabs: **Leren** · **Woorden** · **Instelling
 - The main word sits at the **same fixed position** on every card.
 - Primary buttons at the bottom, in thumb reach. Respect safe areas (`viewport-fit=cover`, `env(safe-area-inset-*)`).
 - Motion: a short fade at most; respect `prefers-reduced-motion`.
+- Short messages at the bottom (toasts, such as "Goed ✓" after a multiple choice) let taps through to the buttons under them and disappear as soon as the next answer is revealed, so they never contradict its feedback (until v0.7.0 they swallowed a tap on "Verder" for 1.2 s and could sit over "Niet goed").
 
 ### 10.2 Gender colors (after answering only)
 - **der = blue · die = orange-red · das = teal-green**, starting from Okabe-Ito (`#0072B2`, `#D55E00`, `#009E73`). Adjust for ≥ 4.5:1 contrast on both backgrounds, with lighter variants in dark mode.

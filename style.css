@@ -145,6 +145,7 @@ main > .bottom { margin-top: auto; padding-top: 32px; }
   background: var(--fg); color: var(--bg);
   padding: 10px 16px; border-radius: 10px; max-width: calc(100% - 40px);
   font-size: 15px;
+  pointer-events: none; /* it sits over the bottom buttons: a tap must reach them */
 }
 dialog {
   border: 1px solid var(--line); border-radius: 16px;
