@@ -219,6 +219,52 @@ test('an unfinished word continues at the start of the next session', async () =
   assert.deepEqual([first.word.id, first.step], [2, 'type2']);
 });
 
+test('a miss while learning: the word graduates with Hard instead of Good; a clean run with Good', async () => {
+  for (const [miss, expected] of [['mc', Grade.Hard], ['type1', Grade.Hard], ['type2', Grade.Hard], [null, Grade.Good]]) {
+    const { s, store } = session({ settings: { newPerDay: 1 } });
+    let done = false;
+    await play(s, (sc) => {
+      if (done || sc.step !== miss) return null;
+      done = true;
+      return sc.step === 'mc' ? (sc.correct + 1) % 4 : 'falsch';
+    });
+    const card = store.cards.get('1:production');
+    assert.equal(store.log.find((r) => r.grade != null).grade, expected, `miss in ${miss}`);
+    assert.equal(card.fsrs.reps, 1);
+    assert.equal(card.missed, undefined, 'the flag is gone after graduating');
+  }
+});
+
+test('a miss while learning is kept when the session ends before graduating', async () => {
+  const { s, store } = session({ settings: { newPerDay: 1 } });
+  s.answerIntro(s.next(), 'continue', 1000);
+  const mc = s.next();
+  s.answerChoice(mc, (mc.correct + 1) % 4, 1000);
+  await s.flush();
+  assert.equal(store.cards.get('1:production').missed, true);
+  const next = session({ cards: [...store.cards.values()], wordStates: [...store.words.values()], settings: { newPerDay: 0 } });
+  await play(next.s);
+  assert.equal(next.store.log.find((r) => r.grade != null).grade, Grade.Hard);
+});
+
+test('"Ik had gelijk" on a learning step: the miss does not count', async () => {
+  const { s, store } = session({ settings: { newPerDay: 1 } });
+  let overridden = false;
+  for (let i = 0; i < 50; i++) {
+    const sc = s.next();
+    if (!sc) break;
+    if (sc.step === 'intro') s.answerIntro(sc, 'continue', 1000);
+    else if (sc.step === 'mc') s.answerChoice(sc, sc.correct, 1000);
+    else if (sc.step === 'type1' && !overridden) {
+      s.answerTyped(sc, 'prima', 1000);
+      assert.ok(s.override());
+      overridden = true;
+    } else s.answerTyped(sc, displayForm(sc.word), 1000);
+  }
+  await s.flush();
+  assert.equal(store.log.find((r) => r.grade != null).grade, Grade.Good);
+});
+
 test('"Ik had gelijk" on a lapse: graded Good instead, answer accepted from then on, reported', async () => {
   const { s, store } = session({ cards: [reviewCard(1, 10)], settings: { newPerDay: 0 } });
   const sc = s.next();

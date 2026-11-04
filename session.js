@@ -411,8 +411,16 @@ export class Session {
 
   graduate(item, rating, now) {
     this.learning = this.learning.filter((i) => i !== item);
-    this.saveCard({ ...rate(this.cards.get(item.cardId), rating, now, this.settings.retention), step: null });
+    const { missed, ...card } = this.cards.get(item.cardId);
+    this.saveCard({ ...rate(card, rating, now, this.settings.retention), step: null });
     return rating;
+  }
+
+  // A miss while learning (multiple choice, a typing step, or the Te makkelijk check) is stored on
+  // the card, so it survives the end of a session; the word then graduates with Hard (§8.1).
+  markMissed(item) {
+    const card = this.cards.get(item.cardId);
+    if (!card.missed) this.saveCard({ ...card, missed: true });
   }
 
   log(screen, ms, fields) {
@@ -446,6 +454,7 @@ export class Session {
     this.log(screen, ms, { answer: screen.options[choice], outcome: correct ? 'correct' : 'wrong' });
     this.resolved(screen, ms);
     const { item } = screen;
+    if (!correct) this.markMissed(item);
     if (correct) {
       const step = item.after || 'type1';
       item.after = null;
@@ -499,11 +508,15 @@ export class Session {
       }
     } else if (item.step === 'tooEasy') {
       if (result.outcome === 'correct') rated = this.passTooEasy(item, now);
-      else this.setStep(item, 'mc', this.shown);
+      else {
+        this.markMissed(item);
+        this.setStep(item, 'mc', this.shown);
+      }
     } else if (passed) {
       rated = this.passTyping(item, now);
     } else {
       // A miss in a typing step: multiple choice once more, then the same typing step again.
+      this.markMissed(item);
       item.after = item.step;
       this.setStep(item, 'mc', this.shown + GAP.typeMiss);
     }
@@ -517,7 +530,10 @@ export class Session {
       this.setStep(item, 'type2', this.shown + GAP.type2);
       return null;
     }
-    return this.graduate(item, Grade.Good, now);
+    // A word that went wrong somewhere while learning starts with Hard: FSRS sets a card's
+    // difficulty and first interval from its first rating, and Anki feeds it every learning-step
+    // answer, so a miss there counts. Here one rating stands for all of them (§8.1).
+    return this.graduate(item, this.cards.get(item.cardId).missed ? Grade.Hard : Grade.Good, now);
   }
 
   passTooEasy(item, now) {
@@ -552,6 +568,11 @@ export class Session {
     } else if (screen.step === 'tooEasy') {
       rated = this.passTooEasy(item, at);
     } else if (last.result.outcome !== 'almost') {
+      // He was right after all: the miss doesn't count.
+      if (!prevCard.missed) {
+        const { missed, ...card } = this.cards.get(item.cardId);
+        this.saveCard(card);
+      }
       item.step = item.after;
       item.after = null;
       rated = this.passTyping(item, at);
