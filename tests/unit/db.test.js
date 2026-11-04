@@ -198,18 +198,19 @@ test('backup → reset → restore with real FSRS cards: dates stay dates, the s
     id: i + 1, rank: i + 1, pos: 'adj', de: `wort${i + 1}`, nl: [`woord${i + 1}`], acceptAlso: [], groups: [], showInitial: false,
   }));
   const settings = await db.getSettings();
-  // Day 1: learn 5 words; day 6: review them, one lapse; day 7: start a word and stop halfway.
-  for (const [day, newPerDay, stopAfter] of [[1, 5, Infinity], [6, 0, Infinity], [7, 1, 2]]) {
+  // Day 1: learn 8 words; day 6: review them, one lapse; day 7: start a word and stop halfway.
+  // (Leren on days 1 and 7, Herhalen on day 6.)
+  for (const [day, newPerDay, stopAfter, mode] of [[1, 8, Infinity, 'learn'], [6, 0, Infinity, 'review'], [7, 1, 1, 'learn']]) {
     let t = new Date(2026, 9, day, 10).getTime();
     const s = new Session({
       words, wordStates: await db.getAll('words'), cards: await db.getAll('cards'), settings: { ...settings, newPerDay },
-      seconds: DEFAULT_SECONDS, store: dbStore(db), now: () => new Date((t += 5000)),
+      seconds: DEFAULT_SECONDS, store: dbStore(db), now: () => new Date((t += 5000)), mode,
     });
     for (let n = 0; n < stopAfter; n++) {
       const sc = s.next();
       if (!sc) break;
-      if (sc.step === 'intro') s.answerIntro(sc, 'continue', 3000);
-      else if (sc.step === 'mc') s.answerChoice(sc, sc.correct, 2000);
+      if (sc.step === 'round') s.nextRound();
+      else if (sc.step === 'intro' || sc.step === 'mc') s.answerChoice(sc, sc.correct, 2000);
       else s.answerTyped(sc, sc.word.id === 2 && sc.step === 'review' ? 'falsch' : displayForm(sc.word), 4000);
     }
     await s.flush();

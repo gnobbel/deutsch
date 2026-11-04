@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS = {
   audioVoice: null,
   showSentence: false, // show the example sentence on every card, not only after "Toon zin"
   easyLevels: [], // levels (of 100 words) marked "te makkelijk"
+  learnLevel: null, // the level Leren takes new words from (null: the normal order)
 };
 
 // Data migrations, in order. Each takes a dump ({store: rows[]}) at schema `to - 1`

@@ -29,13 +29,16 @@ export function rng(seed) {
 // (difficultyOf in session.js); typos now and then; time per card from typical typing speed.
 const LEARNER = {
   tooEasy: 0.05, tooEasyRight: 0.7, mcRight: 0.95, typo: 0.06, relearnRight: 0.9,
+  // A new word's first question is a multiple choice before he has seen it (Leren, §6.2): a
+  // cognate is easy to guess, another word much less so.
+  firstRight: { cognate: 0.85, other: 0.4 },
   // The scan: how many words of an easy level he marks as known, and how many of those he
   // actually can't type yet (wrong article, spelling): their first review fails more often.
   scanKnown: 0.9, scanOverconfident: 0.15, overconfidentRight: 0.3, scanMsPerWord: 2500,
   learnRight: { easy: 0.9, medium: 0.85, hard: 0.75 },
   penalty: 0.04,
   hardPenalty: 0.04, // extra, on reviews of hard words
-  ms: { intro: 15000, mc: 6000, type: 10000, correct: 9000, almost: 14000, wrong: 20000 },
+  ms: { intro: 15000, mc: 6000, first: 8000, type: 10000, correct: 9000, almost: 14000, wrong: 20000 },
 };
 
 const typo = (s) => (s.length > 5 ? s.slice(0, -2) + s.at(-1) + s.at(-2) : `${s}x`);
@@ -83,48 +86,57 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
         clock += page.length * LEARNER.scanMsPerWord;
       }
     }
-    const s = new Session({
-      words, wordStates: [...store.words.values()], cards: [...store.cards.values()], settings,
-      seconds: secondsPerCard(store.log.slice(-3000)), store: memory, now, random,
-    });
-    const stat = { day: d + 1, skipped: false, reviews: 0, correct: 0, lapses: 0, newWords: 0, ms: scanMs, scanned, paused: s.paused, dueAtStart: s.reviews.length };
-    for (let guard = 0; guard < 5000; guard++) {
-      const sc = s.next();
-      if (!sc) break;
-      const word = sc.word;
-      let ms;
-      if (sc.step === 'intro') {
-        const easy = random() < LEARNER.tooEasy;
-        ms = LEARNER.ms.intro;
-        s.answerIntro(sc, easy ? 'tooEasy' : 'continue', ms);
-      } else if (sc.step === 'mc') {
-        ms = LEARNER.ms.mc;
-        s.answerChoice(sc, random() < LEARNER.mcRight ? sc.correct : (sc.correct + 1) % 4, ms);
-      } else {
-        let p;
-        const band = difficultyBand(word);
-        if (sc.step === 'review' && overconfident.delete(word.id)) p = LEARNER.overconfidentRight;
-        else if (sc.step === 'review') p = Math.max(0, retrievability(sc.card, now(), retention) - penalty - (band === 'hard' ? LEARNER.hardPenalty : 0));
-        else if (sc.step === 'relearn') p = LEARNER.relearnRight;
-        else if (sc.step === 'tooEasy') p = LEARNER.tooEasyRight;
-        else p = LEARNER.learnRight[band];
-        const right = random() < p;
-        const slip = right && random() < LEARNER.typo;
-        const answer = !right ? 'xyzzy' : slip ? typo(displayForm(word)) : displayForm(word);
-        ms = !right ? LEARNER.ms.wrong : slip ? LEARNER.ms.almost : LEARNER.ms.correct;
-        if (sc.step !== 'review') ms = Math.min(ms, LEARNER.ms.type + (right && !slip ? 0 : 8000));
-        const r = s.answerTyped(sc, answer, ms);
-        if (sc.step === 'review') {
-          stat.reviews++;
-          if (r.outcome === 'correct' || r.outcome === 'almost') stat.correct++;
-          else stat.lapses++;
+    // Herhalen first, then Leren (the order Home suggests, §9).
+    const stat = { day: d + 1, skipped: false, reviews: 0, correct: 0, lapses: 0, newWords: 0, ms: scanMs, scanned, paused: false, dueAtStart: 0 };
+    for (const mode of ['review', 'learn']) {
+      const s = new Session({
+        words, wordStates: [...store.words.values()], cards: [...store.cards.values()], settings,
+        seconds: secondsPerCard(store.log.slice(-3000)), store: memory, now, random, mode,
+      });
+      if (mode === 'review') Object.assign(stat, { paused: s.paused, dueAtStart: s.queue.length });
+      for (let guard = 0; guard < 5000; guard++) {
+        const sc = s.next();
+        if (!sc) break;
+        if (sc.step === 'round') {
+          s.nextRound();
+          continue;
         }
+        const word = sc.word;
+        let ms;
+        if (sc.step === 'intro' && random() < LEARNER.tooEasy) {
+          ms = LEARNER.ms.first;
+          s.answerIntro(sc, 'tooEasy', ms);
+        } else if (sc.step === 'intro' || sc.step === 'mc') {
+          const p = sc.step === 'intro' ? LEARNER.firstRight[word.cognate ? 'cognate' : 'other'] : LEARNER.mcRight;
+          const right = random() < p;
+          ms = (sc.step === 'intro' ? LEARNER.ms.first : LEARNER.ms.mc) + (right ? 0 : LEARNER.ms.intro); // a miss shows the word
+          s.answerChoice(sc, right ? sc.correct : (sc.correct + 1) % 4, ms);
+        } else {
+          let p;
+          const band = difficultyBand(word);
+          if ((sc.step === 'review' || sc.step === 'test') && overconfident.delete(word.id)) p = LEARNER.overconfidentRight;
+          else if (sc.step === 'review') p = Math.max(0, retrievability(sc.card, now(), retention) - penalty - (band === 'hard' ? LEARNER.hardPenalty : 0));
+          else if (sc.step === 'relearn') p = LEARNER.relearnRight;
+          else if (sc.step === 'tooEasy') p = LEARNER.tooEasyRight;
+          else p = LEARNER.learnRight[band];
+          const right = random() < p;
+          const slip = right && random() < LEARNER.typo;
+          const answer = !right ? 'xyzzy' : slip ? typo(displayForm(word)) : displayForm(word);
+          ms = !right ? LEARNER.ms.wrong : slip ? LEARNER.ms.almost : LEARNER.ms.correct;
+          if (sc.step !== 'review') ms = Math.min(ms, LEARNER.ms.type + (right && !slip ? 0 : 8000));
+          const r = s.answerTyped(sc, answer, ms);
+          if (sc.step === 'review') {
+            stat.reviews++;
+            if (r.outcome === 'correct' || r.outcome === 'almost') stat.correct++;
+            else stat.lapses++;
+          }
+        }
+        stat.ms += ms;
+        clock += ms;
       }
-      stat.ms += ms;
-      clock += ms;
+      await s.flush();
+      stat.newWords += s.stats.newWords;
     }
-    await s.flush();
-    stat.newWords = s.stats.newWords;
     out.push(stat);
   }
   const learned = [...store.cards.values()].filter((c) => c.step == null).length;

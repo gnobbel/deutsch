@@ -1,6 +1,6 @@
 // Service worker: makes the app work offline and handles updates (PLAN §12.4).
 // Bump VERSION on every push that changes any file in PRECACHE (npm run check enforces it).
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 const CACHE = `deutsch-v${VERSION}`;
 
 const PRECACHE = [

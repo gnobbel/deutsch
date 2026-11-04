@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import {
-  Session, WORD_FILES, pickNewWord, planToday, mcOptions, GAP, levels, currentLevel, levelOf, SCANS_PER_DAY, LEVEL_SIZE,
+  Session, WORD_FILES, pickNewWord, planToday, mcOptions, ROUND_SIZE, TEST_SIZE, levelProgress, testCards, levels, currentLevel, levelOf, SCANS_PER_DAY, LEVEL_SIZE,
   scanBatch, applyScan, levelLooksEasy, levelsBelow, startLevelOf,
   difficultyOf, difficultyBand, HARD_PER_DAY,
 } from '../../session.js';
@@ -34,17 +34,18 @@ function memoryStore() {
   });
 }
 
-function session({ words = base, cards = [], wordStates = [], settings = {}, now = NOW } = {}) {
+function session({ words = base, cards = [], wordStates = [], settings = {}, now = NOW, mode = 'review', level = null } = {}) {
   const store = memoryStore();
   let t = now.getTime();
   const s = new Session({
-    words, cards, wordStates, store, settings: { ...DEFAULT_SETTINGS, ...settings }, seconds: DEFAULT_SECONDS,
+    words, cards, wordStates, store, settings: { ...DEFAULT_SETTINGS, ...settings }, seconds: DEFAULT_SECONDS, mode, level,
     now: () => new Date((t += 1000)), random: () => 0.5,
   });
   return { s, store };
 }
 
-// Plays a session the way a perfect learner would; `answer` can override per screen.
+// Plays a session the way a perfect learner would; `answer` can override per screen ('tooEasy'
+// on a new word's first question is "Ken ik al"). Round summaries show up as { step: 'round' }.
 async function play(s, answer = () => null, max = 500) {
   const seen = [];
   for (let i = 0; i < max; i++) {
@@ -53,10 +54,15 @@ async function play(s, answer = () => null, max = 500) {
       await s.flush();
       return seen;
     }
+    if (sc.step === 'round') {
+      seen.push({ step: 'round', n: s.shown, results: sc.results });
+      s.nextRound();
+      continue;
+    }
     seen.push({ id: sc.word.id, step: sc.step, n: s.shown });
     const custom = answer(sc);
-    if (sc.step === 'intro') s.answerIntro(sc, custom ?? 'continue', 3000);
-    else if (sc.step === 'mc') s.answerChoice(sc, custom ?? sc.correct, 2000);
+    if (sc.step === 'intro' && custom === 'tooEasy') s.answerIntro(sc, 'tooEasy', 3000);
+    else if (sc.step === 'intro' || sc.step === 'mc') s.answerChoice(sc, custom ?? sc.correct, 2000);
     else s.answerTyped(sc, custom ?? displayForm(sc.word), 4000);
   }
   throw new Error('session did not end');
@@ -99,68 +105,89 @@ test('daily limit: words introduced today count, Te makkelijk ones do not', () =
   assert.equal(plan.newLeft, base.length - 3 - 1);
 });
 
-test('a new word: intro → multiple choice → two typing steps → graduates with one Good', async () => {
-  const { s, store } = session({ settings: { newPerDay: 1 } });
+test('Leren: a new word starts as multiple choice, is typed next round, then gekend with one Good', async () => {
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
   const seen = await play(s);
-  assert.deepEqual(seen.map((x) => x.step), ['intro', 'mc', 'type1', 'type2']);
+  assert.deepEqual(seen.map((x) => x.step), ['intro', 'round', 'type1', 'round']);
   const card = store.cards.get('1:production');
   assert.equal(card.step, null);
   assert.equal(card.fsrs.state, State.Review);
   assert.equal(card.fsrs.reps, 1, 'FSRS rated exactly once');
-  assert.deepEqual(store.log.map((r) => r.grade), [null, null, null, Grade.Good]);
+  assert.deepEqual(store.log.map((r) => r.grade), [null, Grade.Good]);
   assert.equal(store.words.get(1).introducedOn instanceof Date, true);
+  assert.deepEqual(seen[1].results.map((r) => r.ok), [true]);
 });
 
-test('learning steps are spread out: typing 1 after 3+ other cards, typing 2 after 8+', async () => {
-  const cards = Array.from({ length: 30 }, (_, i) => reviewCard(30 + i, 3)).filter((c) => c.fsrs.due <= new Date(NOW.getTime() + 864e5));
-  const { s } = session({ cards: cards.length ? cards : Array.from({ length: 30 }, (_, i) => reviewCard(30 + i, 10)), settings: { newPerDay: 3 } });
+test('Leren: rounds of up to ROUND_SIZE words, each once per round, never the same word twice in a row', async () => {
+  const { s } = session({ mode: 'learn', settings: { newPerDay: 10 } });
   const seen = await play(s);
-  for (const id of [1, 2, 3]) {
-    const at = (step) => seen.find((x) => x.id === id && x.step === step).n;
-    assert.ok(at('type1') - at('mc') - 1 >= GAP.type1, `word ${id} type1`);
-    assert.ok(at('type2') - at('type1') - 1 >= GAP.type2, `word ${id} type2`);
+  const rounds = [];
+  let cur = [];
+  for (const x of seen) {
+    if (x.step === 'round') { rounds.push(cur); cur = []; } else cur.push(x.id);
   }
+  assert.equal(rounds[0].length, ROUND_SIZE, 'the first round is full');
+  for (const r of rounds) assert.equal(new Set(r).size, r.length, 'each word once per round');
+  const flat = seen.filter((x) => x.step !== 'round');
+  for (let i = 1; i < flat.length; i++) assert.notEqual(flat[i].id, flat[i - 1].id, 'never twice in a row');
+  // Round 2 asks the same 7 typed; once they are gekend, the 8th to 10th words fill round 3.
+  assert.deepEqual(new Set(rounds[1]), new Set(rounds[0]));
+  assert.equal(new Set(flat.map((x) => x.id)).size, 10);
+  assert.ok(rounds[2].length === 3 && rounds[2].every((id) => !rounds[0].includes(id)));
 });
 
-test('one new word after about every 4 reviews', async () => {
-  const cards = Array.from({ length: 12 }, (_, i) => reviewCard(30 + i, 10));
-  const { s } = session({ cards, settings: { newPerDay: 2 } });
-  const seen = await play(s);
-  assert.deepEqual(seen.slice(0, 5).map((x) => x.step), ['review', 'review', 'review', 'review', 'intro']);
+test('Herhalen has only reviews and relearning steps; Leren only words being learned', async () => {
+  const cards = Array.from({ length: 5 }, (_, i) => reviewCard(30 + i, 10));
+  const review = await play(session({ cards, settings: { newPerDay: 3 } }).s);
+  assert.ok(review.every((x) => x.step === 'review'));
+  assert.equal(review.length, 5);
+  const learn = await play(session({ cards, mode: 'learn', settings: { newPerDay: 3 } }).s);
+  assert.ok(learn.every((x) => x.step !== 'review'));
+  assert.equal(learn.filter((x) => x.step === 'intro').length, 3);
 });
 
-test('multiple-choice miss: intro again, multiple choice later; typing miss: multiple choice, then the same step', async () => {
-  const { s, store } = session({ settings: { newPerDay: 1 } });
+test('a wrong multiple choice: the word is shown, multiple choice again next round; a typed miss: multiple choice, then typed again', async () => {
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
   let mcMissed = false;
   let typeMissed = false;
   const seen = await play(s, (sc) => {
-    if (sc.step === 'mc' && !mcMissed) { mcMissed = true; return (sc.correct + 1) % 4; }
-    if (sc.step === 'type2' && !typeMissed) { typeMissed = true; return 'falsch'; }
+    if (sc.step === 'intro' && !mcMissed) { mcMissed = true; return (sc.correct + 1) % 4; }
+    if (sc.step === 'type1' && !typeMissed) { typeMissed = true; return 'falsch'; }
     return null;
   });
-  assert.deepEqual(seen.map((x) => x.step), ['intro', 'mc', 'mc', 'type1', 'type2', 'mc', 'type2']);
+  assert.deepEqual(seen.filter((x) => x.step !== 'round').map((x) => x.step), ['intro', 'mc', 'type1', 'mc', 'type1']);
   assert.equal(store.cards.get('1:production').fsrs.reps, 1);
+  assert.equal(store.log.find((r) => r.step === 'intro').outcome, 'wrong');
 });
 
-test('Te makkelijk: one correct answer → Easy, not counted, so another new word follows', async () => {
-  const { s, store } = session({ settings: { newPerDay: 1 } });
+test('"Weet ik niet" on the first question counts as a first look, like a wrong choice', async () => {
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
+  const sc = s.next();
+  const r = s.answerChoice(sc, -1, 1000);
+  assert.deepEqual([r.correct, r.showWord], [false, true]);
+  await play(s);
+  assert.equal(store.log[0].outcome, 'dontKnow');
+  assert.equal(store.log.find((x) => x.grade != null).grade, Grade.Good, 'a first look is not a miss');
+});
+
+test('Te makkelijk ("Ken ik al"): one correct typed answer next round → Easy, not counted, so another new word follows', async () => {
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
   const seen = await play(s, (sc) => (sc.step === 'intro' && sc.word.id === 1 ? 'tooEasy' : null));
-  assert.deepEqual(seen.slice(0, 2).map((x) => x.step), ['intro', 'tooEasy']);
+  assert.deepEqual(seen.slice(0, 3).map((x) => x.step), ['intro', 'round', 'tooEasy']);
   assert.equal(store.words.get(1).tooEasy, true);
   assert.equal(store.log.find((r) => r.step === 'tooEasy').grade, Grade.Easy);
-  assert.ok(seen.some((x) => x.id === 2 && x.step === 'type2'), 'word 2 introduced and learned');
+  assert.ok(seen.some((x) => x.id === 2 && x.step === 'type1'), 'word 2 introduced and learned');
 });
 
-test('Te makkelijk: the check comes after a few other cards, not straight after the intro', async () => {
-  // With reviews to do, the typed check waits GAP.tooEasy cards, so it tests memory rather than
-  // the German word that was on screen a moment ago (§6.2).
-  const cards = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29].map((id) => reviewCard(id, 10));
-  const { s, store } = session({ cards, settings: { newPerDay: 1 } });
-  const seen = await play(s, (sc) => (sc.step === 'intro' ? 'tooEasy' : null));
-  const intro = seen.findIndex((x) => x.step === 'intro');
-  const check = seen.findIndex((x) => x.step === 'tooEasy');
-  assert.ok(intro >= 0 && check > intro);
-  assert.equal(check - intro - 1, GAP.tooEasy, 'other cards in between');
+test('Te makkelijk: the check comes in the next round, with other cards in between', async () => {
+  // The typed check must test memory, not the word that was on screen a moment ago (§6.2).
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 4 } });
+  const seen = await play(s, (sc) => (sc.step === 'intro' && sc.word.id === 1 ? 'tooEasy' : null));
+  const flat = seen.filter((x) => x.step !== 'round');
+  const intro = flat.findIndex((x) => x.id === 1 && x.step === 'intro');
+  const check = flat.findIndex((x) => x.step === 'tooEasy');
+  assert.ok(check - intro - 1 >= 1, 'other cards in between');
+  assert.ok(seen.findIndex((x) => x.step === 'round') < seen.findIndex((x) => x.step === 'tooEasy'), 'in a later round');
   assert.equal(store.words.get(1).tooEasy, true);
 });
 
@@ -172,11 +199,12 @@ test('Te makkelijk: a check that is still open does not count for "Dit niveau li
   assert.equal(levelLooksEasy(1, base, ws, [], new Set([6])), true, 'word 6 is still waiting for its check');
 });
 
-test('Te makkelijk answered wrong → the normal learning steps', async () => {
-  const { s, store } = session({ settings: { newPerDay: 1 } });
+test('Te makkelijk answered wrong → multiple choice next round, then typed; it counts as a miss', async () => {
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
   const seen = await play(s, (sc) => (sc.step === 'intro' ? 'tooEasy' : sc.step === 'tooEasy' ? 'slecht' : null));
-  assert.deepEqual(seen.map((x) => x.step), ['intro', 'tooEasy', 'mc', 'type1', 'type2']);
+  assert.deepEqual(seen.filter((x) => x.step !== 'round').map((x) => x.step), ['intro', 'tooEasy', 'mc', 'type1']);
   assert.equal(store.words.get(1).tooEasy, false);
+  assert.equal(store.log.find((r) => r.grade != null).grade, Grade.Hard);
 });
 
 test('lapse: rated Again once, then one relearning step that is not rated', async () => {
@@ -211,50 +239,58 @@ test('a card whose word was removed from the data stays stored but hidden (§12.
   assert.equal(s.next(), null);
 });
 
-test('an unfinished word continues at the start of the next session', async () => {
+test('an unfinished word continues in the next Leren session (an old type2 step counts as typed)', async () => {
   const card = { ...newCard(2, 'production', new Date('2026-10-28T10:00:00+01:00')), step: 'type2' };
   const ws = { wordId: 2, introducedOn: new Date('2026-10-28T10:00:00+01:00'), tooEasy: false, accepted: [] };
-  const { s } = session({ cards: [card], wordStates: [ws], settings: { newPerDay: 1 } });
-  const first = s.next();
-  assert.deepEqual([first.word.id, first.step], [2, 'type2']);
+  const { s } = session({ mode: 'learn', cards: [card], wordStates: [ws], settings: { newPerDay: 1 } });
+  const seen = await play(s);
+  assert.equal(seen.find((x) => x.id === 2).step, 'type1');
+  assert.ok(seen.slice(0, 2).some((x) => x.id === 2), 'in the first round');
 });
 
-test('a miss while learning: the word graduates with Hard instead of Good; a clean run with Good', async () => {
-  for (const [miss, expected] of [['mc', Grade.Hard], ['type1', Grade.Hard], ['type2', Grade.Hard], [null, Grade.Good]]) {
-    const { s, store } = session({ settings: { newPerDay: 1 } });
-    let done = false;
-    await play(s, (sc) => {
-      if (done || sc.step !== miss) return null;
-      done = true;
-      return sc.step === 'mc' ? (sc.correct + 1) % 4 : 'falsch';
-    });
+test('a miss while learning: the word becomes gekend with Hard instead of Good; a clean run or a first look with Good', async () => {
+  const wrong = (sc) => (sc.correct + 1) % 4;
+  const cases = [
+    ['a wrong first question only', (sc, n) => (n === 0 ? wrong(sc) : null), Grade.Good],
+    ['a wrong second multiple choice', (sc, n) => (n <= 1 && sc.step !== 'type1' ? wrong(sc) : null), Grade.Hard],
+    ['a typed miss', (sc, n) => (sc.step === 'type1' && n === 1 ? 'falsch' : null), Grade.Hard],
+    ['a clean run', () => null, Grade.Good],
+  ];
+  for (const [name, answer, expected] of cases) {
+    const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
+    let n = 0;
+    await play(s, (sc) => answer(sc, n++));
     const card = store.cards.get('1:production');
-    assert.equal(store.log.find((r) => r.grade != null).grade, expected, `miss in ${miss}`);
+    assert.equal(store.log.find((r) => r.grade != null).grade, expected, name);
     assert.equal(card.fsrs.reps, 1);
     assert.equal(card.missed, undefined, 'the flag is gone after graduating');
   }
 });
 
 test('a miss while learning is kept when the session ends before graduating', async () => {
-  const { s, store } = session({ settings: { newPerDay: 1 } });
-  s.answerIntro(s.next(), 'continue', 1000);
-  const mc = s.next();
-  s.answerChoice(mc, (mc.correct + 1) % 4, 1000);
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
+  const first = s.next();
+  s.answerChoice(first, (first.correct + 1) % 4, 1000);
+  assert.equal(s.next().step, 'round');
+  s.nextRound();
+  const second = s.next();
+  assert.equal(second.step, 'mc');
+  s.answerChoice(second, (second.correct + 1) % 4, 1000);
   await s.flush();
   assert.equal(store.cards.get('1:production').missed, true);
-  const next = session({ cards: [...store.cards.values()], wordStates: [...store.words.values()], settings: { newPerDay: 0 } });
+  const next = session({ mode: 'learn', cards: [...store.cards.values()], wordStates: [...store.words.values()], settings: { newPerDay: 0 } });
   await play(next.s);
   assert.equal(next.store.log.find((r) => r.grade != null).grade, Grade.Hard);
 });
 
-test('"Ik had gelijk" on a learning step: the miss does not count', async () => {
-  const { s, store } = session({ settings: { newPerDay: 1 } });
+test('"Ik had gelijk" on a typed learning step: the miss does not count', async () => {
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 1 } });
   let overridden = false;
   for (let i = 0; i < 50; i++) {
     const sc = s.next();
     if (!sc) break;
-    if (sc.step === 'intro') s.answerIntro(sc, 'continue', 1000);
-    else if (sc.step === 'mc') s.answerChoice(sc, sc.correct, 1000);
+    if (sc.step === 'round') { s.nextRound(); continue; }
+    if (sc.step === 'intro' || sc.step === 'mc') s.answerChoice(sc, sc.correct, 1000);
     else if (sc.step === 'type1' && !overridden) {
       s.answerTyped(sc, 'prima', 1000);
       assert.ok(s.override());
@@ -263,6 +299,7 @@ test('"Ik had gelijk" on a learning step: the miss does not count', async () => 
   }
   await s.flush();
   assert.equal(store.log.find((r) => r.grade != null).grade, Grade.Good);
+  assert.equal(store.cards.get('1:production').step, null);
 });
 
 test('the review log says why an answer was wrong (article, umlaut), for §2', async () => {
@@ -382,10 +419,10 @@ test('the scan: known words go to review (Easy), unknown ones become the next ne
   assert.equal(plan.usedToday, 0, 'known words do not count toward the daily limit');
   assert.equal(currentLevel(many, ws, [1]), 2, 'unknown words from a skipped level do not move the current level back');
 
-  // A session introduces the unknown words first, as normal new words with an intro.
-  const { s } = session({ words: many, wordStates: out.wordStates, cards: out.cards, settings: { easyLevels: [1], newPerDay: 3 } });
+  // Leren introduces the unknown words first, as normal new words.
+  const { s } = session({ mode: 'learn', words: many, wordStates: out.wordStates, cards: out.cards, settings: { easyLevels: [1], newPerDay: 3 } });
   const seen = await play(s);
-  assert.deepEqual(seen.filter((x) => x.step === 'intro').map((x) => x.id), [4, 7, 101]);
+  assert.deepEqual(seen.filter((x) => x.step === 'intro').map((x) => x.id).sort((a, b) => a - b), [4, 7, 101]);
 });
 
 test('"Dit niveau lijkt te makkelijk": the last 5 new words of a level all passed Te makkelijk', async () => {
@@ -400,13 +437,17 @@ test('"Dit niveau lijkt te makkelijk": the last 5 new words of a level all passe
 
   // In a session: offered after the fifth passed Te makkelijk; skipping the level makes the next
   // new words come from level 2.
-  const { s, store } = session({ words: many, settings: { newPerDay: 7 } });
+  const { s, store } = session({ mode: 'learn', words: many, settings: { newPerDay: 7 } });
   let offeredAfter = null;
   const intros = [];
   let introsAfterSkip = null;
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 60; i++) {
     const sc = s.next();
     if (!sc) break;
+    if (sc.step === 'round') {
+      s.nextRound();
+      continue;
+    }
     if (sc.step === 'intro') {
       intros.push(sc.word.id);
       introsAfterSkip?.push(sc.word.id);
@@ -416,15 +457,16 @@ test('"Dit niveau lijkt te makkelijk": the last 5 new words of a level all passe
     s.answerTyped(sc, displayForm(sc.word), 1000);
     if (offeredAfter == null && s.levelLooksEasy(levelOf(sc.word))) {
       offeredAfter = sc.word.id;
-      assert.deepEqual(s.skipLevel(1), [1]);
+      assert.deepEqual(s.skipLevel(1), { easyLevels: [1], learnLevel: null });
       introsAfterSkip = [];
     }
   }
   await s.flush();
-  // (Word 3 waits a day: it is in the same confusable set as word 2.)
-  assert.deepEqual(intros.slice(0, 5), [1, 2, 4, 5, 6]);
-  assert.equal(offeredAfter, 6, 'offered once five words were known');
-  // The checks come a few cards after their intro, so words 7 and 8 were already introduced.
+  // Round 1 (shuffled): 7 new words. (Word 3 waits a day: it is in the same confusable set as word 2.)
+  assert.deepEqual(intros.slice(0, 7).sort((a, b) => a - b), [1, 2, 4, 5, 6, 7, 8]);
+  assert.ok(offeredAfter != null, 'offered once five words were known');
+  assert.equal([1, 2, 4, 5, 6, 7, 8].filter((id) => store.words.get(id)?.tooEasy).length >= 5, true);
+  // The checks come in the next round, so words 7 and 8 were already introduced.
   assert.ok(introsAfterSkip.length >= 1);
   assert.ok(introsAfterSkip.every((id) => id > 100), 'the next new words come from level 2');
   assert.equal(store.words.get(1).tooEasy, true);
@@ -501,9 +543,69 @@ test('context sets: a "different" answer gives no first letter (the sentence is 
     W(3, 'bloß', 'maar', { pos: 'adv', clozeOnly: true }),
   ];
   const card = { ...newCard(1, 'production', NOW), step: 'type1' };
-  const { s } = session({ words, cards: [card], wordStates: [{ wordId: 1, introducedOn: NOW, tooEasy: false, accepted: [] }] });
+  const { s } = session({ mode: 'learn', words, cards: [card], wordStates: [{ wordId: 1, introducedOn: NOW, tooEasy: false, accepted: [] }] });
   const sc = s.next();
   assert.equal(s.answerTyped(sc, 'bloß').outcome, 'different');
   assert.equal(sc.hint, null);
   assert.equal(s.answerTyped(sc, 'aber').sibling, 'aber');
+});
+
+// ---------- choosing a level, progress, Toets (§6.2, §6.4) ----------
+
+test('Leren with a chosen level: new words come from that level only', async () => {
+  const { s, store } = session({ mode: 'learn', words: many, settings: { newPerDay: 5, learnLevel: 2 } });
+  await play(s);
+  const introduced = [...store.words.values()].filter((w) => w.introducedOn).map((w) => w.wordId);
+  assert.equal(introduced.length, 5);
+  assert.ok(introduced.every((id) => levelOf(many.find((w) => w.id === id)) === 2));
+  const plan = planToday({ words: many, wordStates: new Map(), cards: new Map(), settings: { ...DEFAULT_SETTINGS, learnLevel: 2 }, seconds: DEFAULT_SECONDS, now: NOW });
+  assert.equal(plan.newToday, DEFAULT_SETTINGS.newPerDay);
+});
+
+test('level progress: gekend, bezig and nieuw per level', async () => {
+  const { s, store } = session({ mode: 'learn', words: many, settings: { newPerDay: 3 } });
+  let n = 0;
+  // Stop halfway: the first round's words are answered, nothing typed yet.
+  for (let sc = s.next(); sc && sc.step !== 'round'; sc = s.next()) { s.answerChoice(sc, sc.correct, 1000); n++; }
+  await s.flush();
+  assert.equal(n, 3);
+  assert.deepEqual(levelProgress(many, store.cards, 1), { level: 1, total: 100, known: 0, learning: 3, fresh: 97 });
+  const cards = new Map([...store.cards, ['5:production', reviewCard(5, 3)]]);
+  assert.deepEqual(levelProgress(many, cards, 1), { level: 1, total: 100, known: 1, learning: 3, fresh: 96 });
+});
+
+test('Toets: learned words of the level, typed, scored; a rating counts once per word per day', async () => {
+  const cards = [1, 2, 4, 5, 101].map((id) => reviewCard(id, 2));
+  cards[1] = { ...cards[1], fsrs: { ...cards[1].fsrs, last_review: new Date(NOW.getTime() - 3600e3) } }; // word 2: reviewed today
+  assert.deepEqual(testCards(many, new Map(cards.map((c) => [c.id, c])), 1).map((c) => c.wordId).sort(), [1, 2, 4, 5]);
+  const { s, store } = session({ mode: 'test', level: 1, words: many, cards });
+  const seen = await play(s, (sc) => (sc.word.id === 4 ? 'falsch' : null));
+  assert.equal(seen.length, 4);
+  assert.ok(seen.every((x) => x.step === 'test'));
+  assert.deepEqual(s.results.map((r) => [r.wordId, r.ok]).sort((a, b) => a[0] - b[0]), [[1, true], [2, true], [4, false], [5, true]]);
+  const graded = store.log.filter((r) => r.grade != null).map((r) => [Number(r.cardId.split(':')[0]), r.grade]).sort((a, b) => a[0] - b[0]);
+  assert.deepEqual(graded, [[1, Grade.Good], [4, Grade.Again], [5, Grade.Good]], 'word 2 was already reviewed today: practice only');
+  assert.equal(store.cards.get('4:production').fsrs.lapses, 1);
+  assert.equal(store.cards.get('4:production').step, null, 'no relearning step in a Toets');
+});
+
+test(`Toets: at most ${TEST_SIZE} words`, () => {
+  const cards = Array.from({ length: 30 }, (_, i) => reviewCard(i + 1, 3));
+  const { s } = session({ mode: 'test', level: 1, words: many, cards });
+  assert.equal(s.total, TEST_SIZE);
+});
+
+test('skipping the chosen level: new words follow the normal order again', () => {
+  const { s } = session({ mode: 'learn', words: many, settings: { newPerDay: 3, learnLevel: 1 } });
+  assert.deepEqual(s.skipLevel(1), { easyLevels: [1], learnLevel: null });
+  assert.deepEqual(s.skipLevel(3), { easyLevels: [1, 3], learnLevel: null });
+});
+
+test('Leren: stopping halfway leaves the new words not asked yet untouched', async () => {
+  const { s, store } = session({ mode: 'learn', settings: { newPerDay: 10 } });
+  s.answerChoice(s.next(), 0, 1000);
+  await s.flush();
+  assert.equal([...store.words.values()].filter((w) => w.introducedOn).length, 1);
+  assert.equal(store.cards.size, 1);
+  assert.equal(s.stats.newWords, 1);
 });

@@ -275,3 +275,40 @@ body.with-keyrow main.full { padding-bottom: calc(env(safe-area-inset-bottom) + 
 .rule.note { margin: 10px 0 0; }
 #skipLevelBox { margin: 10px 0 4px; }
 #skipLevelBox p { margin-bottom: 6px; }
+
+/* Home blocks: Herhalen and Leren (PLAN §9). */
+.block { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 4px 16px 16px; margin: 16px 0; }
+.block h2 { margin-top: 12px; }
+.block .big { margin: 4px 0; }
+.block > button, .block .buttons { margin-top: 12px; }
+.block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.block-head h2 { text-transform: none; letter-spacing: 0; font-size: 17px; color: var(--fg); }
+.block-head button.link { width: auto; flex: none; margin: 0; padding: 0 4px; font-size: 15px; }
+.block > button.link { width: auto; margin-top: 4px; padding: 0; font-size: 15px; }
+.buttons { display: flex; gap: 10px; }
+.buttons button { flex: 1; margin-top: 0; }
+.buttons button + button { margin-top: 0; }
+#startTest { flex: 0 0 34%; }
+
+/* Level progress: gekend solid, bezig half, nieuw empty. Monochrome. */
+.level-bar { display: flex; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 10px 0 6px; }
+.level-bar .known { background: var(--fg); }
+.level-bar .learning { background: var(--muted); opacity: .6; }
+
+/* The level list. */
+.level-list .level-item { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: 12px 16px; margin: 0; }
+.level-list .level-item + .level-item { border-top: 1px solid var(--line); margin-top: 0; }
+.level-list .level-item[aria-pressed="true"] { background: var(--tap); }
+.level-list .level-name { display: block; font-weight: 700; }
+.level-list .level-item .level-bar { margin: 8px 0 4px; height: 6px; }
+
+/* Under the multiple choice: "Weet ik niet" and "Ken ik al". */
+.choice-extra { display: flex; justify-content: space-between; gap: 12px; }
+.choice-extra button.link { width: auto; margin-top: 4px; padding: 0 4px; }
+
+/* Round summary and Toets result. */
+.results { list-style: none; padding: 0; margin: 12px 0 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.results li { padding: 10px 16px; }
+.results li + li { border-top: 1px solid var(--line); }
+.results .mark { display: inline-block; width: 1.6em; font-weight: 700; }
+.results li.miss .mark { color: var(--muted); }

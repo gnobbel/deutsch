@@ -6,7 +6,7 @@ import {
 } from './cards.js';
 import {
   Session, WORD_FILES, planToday, levels, currentLevel, levelOf, levelLooksEasy, levelsBelow, startLevelOf, START_LEVELS,
-  scanBatch, applyScan, SCAN_PAGE,
+  scanBatch, applyScan, SCAN_PAGE, levelProgress, testCards,
 } from './session.js';
 import { secondsPerCard, estimateMinutes } from './srs.js';
 import { grade, diffParts, displayForm } from './grading.js';
@@ -67,7 +67,7 @@ function currentTab() {
 }
 
 async function route() {
-  if (session || scan) return; // a running session or scan owns the screen until it ends
+  if (session || scan || picking) return; // a running session, scan or level list owns the screen until it ends
   if (!(await db.getMeta('firstRunDone'))) {
     tabs.hidden = true;
     view.classList.add('full');
@@ -156,36 +156,70 @@ const dbStore = {
 
 let homeToken = 0;
 
+// A thin bar in three parts: gekend · bezig · nieuw (§9).
+function progressBar(p, id) {
+  const pct = (n) => `${((n / Math.max(1, p.total)) * 100).toFixed(1)}%`;
+  return h('div', { class: 'level-bar', id, role: 'img', 'aria-label': S.home.progress(p) },
+    h('div', { class: 'known', style: `width:${pct(p.known)}` }),
+    h('div', { class: 'learning', style: `width:${pct(p.learning)}` }));
+}
+
 async function renderHome() {
   const token = ++homeToken;
   const st = await loadState();
-  if (token !== homeToken || session || currentTab() !== 'leren' || tabs.hidden) return;
+  if (token !== homeToken || session || picking || currentTab() !== 'leren' || tabs.hidden) return;
   const T = S.home;
   const wordStates = new Map(st.wordStates.map((w) => [w.wordId, w]));
-  const plan = planToday({
-    words: st.words, wordStates, cards: new Map(st.cards.map((c) => [c.id, c])),
-    settings: st.settings, seconds: st.seconds, now: new Date(),
-  });
-  const minutes = estimateMinutes([...plan.reviews, ...plan.learning], plan.newToday, st.seconds);
-  const work = plan.reviews.length + plan.learning.length + plan.newToday;
+  const cards = new Map(st.cards.map((c) => [c.id, c]));
+  const plan = planToday({ words: st.words, wordStates, cards, settings: st.settings, seconds: st.seconds, now: new Date() });
+  const reviewWork = plan.reviews.length + plan.relearn.length;
+  const minutes = estimateMinutes([...plan.reviews, ...plan.relearn], 0, st.seconds);
   const easyLevels = st.settings.easyLevels || [];
-  const cur = currentLevel(st.words, wordStates, easyLevels);
-  const level = cur && levels(st.words, wordStates, easyLevels).find((l) => l.level === cur);
-  // A Te makkelijk check cut off by the end of a session starts again from the intro: not decided yet.
+  const levelList = levels(st.words, wordStates, easyLevels);
+  // The level shown in the Leren block: the chosen one, or the one new words come from now.
+  const chosen = st.settings.learnLevel ?? null;
+  const cur = chosen ?? currentLevel(st.words, wordStates, easyLevels);
+  const level = cur && levelList.find((l) => l.level === cur);
+  const progress = level && levelProgress(st.words, cards, level.level);
+  const learnWork = plan.learnNow.length + plan.newToday;
+  const testable = level ? testCards(st.words, cards, level.level).length : 0;
+  // A Te makkelijk check cut off by the end of a session starts again: not decided yet.
   const pending = new Set(st.cards.filter((c) => c.step === 'tooEasy').map((c) => c.wordId));
   const looksEasy = level && levelLooksEasy(cur, st.words, wordStates, easyLevels, pending);
+  const finished = chosen != null && progress && progress.fresh === 0;
+  const primary = reviewWork ? 'review' : learnWork ? 'learn' : null;
   show(
     waitingWorker && h('button', { class: 'banner', id: 'update', onclick: applyUpdate },
       h('strong', {}, T.updateAvailable),
       h('span', { class: 'muted small' }, T.updateAction + (waitingVersion ? ` (${waitingVersion})` : ''))),
     h('h1', {}, T.title),
-    work
-      ? h('div', { class: 'today', id: 'today' },
-        h('p', { class: 'big' }, T.reviews(plan.reviews.length), h('span', { class: 'muted' }, ` · ${T.minutes(minutes)}`)),
-        h('p', {}, T.newToday(plan.newToday)),
-        plan.learning.length > 0 && h('p', { class: 'muted' }, T.inProgress(new Set(plan.learning.map((c) => c.wordId)).size)))
-      : h('p', { class: 'big', id: 'today' }, T.allDone),
+    // Herhalen: the daily reviews (§6.3).
+    h('section', { class: 'block', id: 'reviewBlock' },
+      h('h2', {}, T.reviewTitle),
+      reviewWork
+        ? h('p', { class: 'big', id: 'today' }, T.reviews(plan.reviews.length), h('span', { class: 'muted' }, ` · ${T.minutes(minutes)}`))
+        : h('p', { id: 'today' }, T.reviewNone),
+      plan.relearn.length > 0 && h('p', { class: 'muted small' }, T.relearnLeft(plan.relearn.length)),
+      reviewWork > 0 && h('button', { class: primary === 'review' ? 'primary' : '', id: 'startReview', onclick: () => startSession(st, 'review') }, T.reviewStart)),
     plan.paused && h('p', { class: 'note' }, T.paused),
+    // Leren: rounds of new words from the chosen level, its progress, and Toets (§6.2, §6.4).
+    level && h('section', { class: 'block', id: 'learnBlock' },
+      h('div', { class: 'block-head' },
+        h('h2', { id: 'level' }, T.levelName(level), chosen == null && h('span', { class: 'muted small' }, ` · ${T.autoLevel}`)),
+        h('button', { class: 'link', id: 'chooseLevel', type: 'button', onclick: () => renderLevelPicker() }, T.chooseLevel)),
+      progressBar(progress, 'levelBar'),
+      h('p', { class: 'muted small', id: 'levelProgress' }, T.progress(progress)),
+      finished ? h('p', { class: 'note', id: 'levelFinished' }, T.levelFinished)
+        : h('p', { id: 'newToday' }, T.newTodayLeft(plan.newToday)),
+      plan.learnNow.length > 0 && h('p', { class: 'muted small' }, T.inProgress(new Set(plan.learnNow.map((c) => c.wordId)).size)),
+      h('div', { class: 'buttons' },
+        h('button', { class: primary === 'learn' ? 'primary' : '', id: 'startLearn', disabled: !learnWork, onclick: () => startSession(st, 'learn') }, T.learnStart),
+        h('button', { id: 'startTest', disabled: !testable, onclick: () => startSession(st, 'test', level.level) }, T.testStart)),
+      !testable && h('p', { class: 'muted small' }, T.testNone),
+      !looksEasy && !level.easy && h('button', { class: 'link', id: 'levelEasy', type: 'button', onclick: () => markLevelEasy(level, easyLevels) }, T.levelTooEasy)),
+    looksEasy && h('div', { class: 'note', id: 'looksEasy' },
+      h('p', {}, T.looksEasy(level.level)),
+      h('button', { id: 'looksEasyOk', onclick: () => markLevelEasy(level, easyLevels) }, T.looksEasyAction(level.level))),
     // The quick scan of levels marked too easy (§6.1).
     plan.scanToday > 0 && h('div', { class: 'scan-box', id: 'scanBox' },
       h('p', {}, h('strong', {}, T.scanToday(plan.scanToday))),
@@ -193,14 +227,57 @@ async function renderHome() {
       h('button', { id: 'scan', onclick: () => startScan(st, plan.scanToday) }, T.scanStart)),
     plan.scanToday === 0 && plan.scanLeft > 0 && !plan.paused && h('p', { class: 'muted small', id: 'scanTomorrow' }, T.scanTomorrow),
     h('p', { class: 'muted small', id: 'newLeft' }, T.newLeft(plan.newLeft), plan.scanLeft > 0 && ` ${T.scanLeft(plan.scanLeft)}`),
-    looksEasy && h('div', { class: 'note', id: 'looksEasy' },
-      h('p', {}, T.looksEasy(level.level)),
-      h('button', { id: 'looksEasyOk', onclick: () => markLevelEasy(level, easyLevels) }, T.looksEasyAction(level.level))),
-    level && h('div', { class: 'level-row' },
-      h('span', { class: 'muted small', id: 'level' }, T.level(level)),
-      !looksEasy && h('button', { class: 'link', id: 'levelEasy', type: 'button', onclick: () => markLevelEasy(level, easyLevels) }, T.levelTooEasy)),
-    h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'start', disabled: !work, onclick: () => startSession(st) }, T.start)),
   );
+}
+
+// ---------- choosing a level (PLAN §6.2) ----------
+
+let picking = false;
+
+async function renderLevelPicker() {
+  const T = S.levels;
+  const st = await loadState();
+  const wordStates = new Map(st.wordStates.map((w) => [w.wordId, w]));
+  const cards = new Map(st.cards.map((c) => [c.id, c]));
+  const easyLevels = st.settings.easyLevels || [];
+  const chosen = st.settings.learnLevel ?? null;
+  picking = true;
+  tabs.hidden = true;
+  view.classList.add('full');
+  const choose = async (n) => {
+    if (n != null && easyLevels.includes(n)) {
+      const ok = await confirmDialog({ title: T.easyTitle(n), body: T.easyBody, ok: T.easyOk });
+      if (!ok) return;
+      await db.setSetting('easyLevels', easyLevels.filter((x) => x !== n));
+    }
+    await db.setSetting('learnLevel', n);
+    closePicker();
+  };
+  show(
+    h('div', { class: 'session-head' },
+      h('button', { class: 'icon', id: 'exit', type: 'button', 'aria-label': T.back, onclick: closePicker }, '✕')),
+    h('h1', {}, T.title),
+    h('p', { class: 'small muted' }, T.intro),
+    h('div', { class: 'list level-list', id: 'levelList' },
+      h('button', { class: 'level-item', type: 'button', id: 'levelAuto', 'aria-pressed': String(chosen == null), onclick: () => choose(null) },
+        h('span', { class: 'level-name' }, T.auto, chosen == null && h('span', { class: 'muted small' }, ` · ${T.current}`)),
+        h('span', { class: 'muted small' }, T.autoHint)),
+      levels(st.words, wordStates, easyLevels).map((l) => {
+        const p = levelProgress(st.words, cards, l.level);
+        return h('button', { class: 'level-item', type: 'button', id: `pick${l.level}`, 'aria-pressed': String(chosen === l.level), onclick: () => choose(l.level) },
+          h('span', { class: 'level-name' }, S.home.levelName(l),
+            chosen === l.level && h('span', { class: 'muted small' }, ` · ${T.current}`),
+            l.easy && h('span', { class: 'muted small' }, ` · ${T.easy}`)),
+          progressBar(p),
+          h('span', { class: 'muted small' }, S.home.progress(p)));
+      })),
+  );
+}
+
+function closePicker() {
+  picking = false;
+  location.hash = '#leren';
+  route();
 }
 
 // "Woorden op dit niveau zijn te makkelijk": its unseen words go to the quick scan (§6.1).
@@ -314,12 +391,12 @@ let sessionSettings = null;
 let shownAt = 0;
 const elapsed = () => Math.min(300000, Math.round(performance.now() - shownAt));
 
-// Synchronous from the tap on Start to the first card, so iOS opens the keyboard.
-function startSession(st) {
+// Synchronous from the tap on Herhalen / Leren / Toets to the first card, so iOS opens the keyboard.
+function startSession(st, mode, level = null) {
   sessionSettings = { ...st.settings };
   session = new Session({
     words: st.words, wordStates: st.wordStates, cards: st.cards, settings: st.settings, seconds: st.seconds,
-    store: dbStore, onError: (e) => toast(S.error(e.message)),
+    store: dbStore, onError: (e) => toast(S.error(e.message)), mode, level,
   });
   tabs.hidden = true;
   view.classList.add('full');
@@ -365,8 +442,11 @@ function sessionHeader() {
       sound.setAttribute('aria-pressed', String(sessionSettings.audio));
     },
   }, sessionSettings.audio ? '🔊' : '🔇');
+  const where = session.mode === 'learn' ? T.roundLabel(session.roundNo)
+    : session.mode === 'test' ? T.testLabel(Math.min(session.total, session.shown + 1), session.total) : null;
   return h('div', { class: 'session-head' },
     h('button', { class: 'icon', id: 'exit', type: 'button', 'aria-label': T.exit, onclick: endSession }, '✕'),
+    where && h('span', { class: 'muted small', id: 'where' }, where),
     h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(session.progress() * 100)) },
       h('div', { style: `width:${(session.progress() * 100).toFixed(1)}%` })),
     sound);
@@ -375,8 +455,8 @@ function sessionHeader() {
 function showScreen(screen) {
   shownAt = performance.now();
   if (!screen) return renderDone();
-  if (screen.step === 'intro') return renderIntro(screen);
-  if (screen.step === 'mc') return renderChoice(screen);
+  if (screen.step === 'round') return renderRound(screen);
+  if (screen.step === 'intro' || screen.step === 'mc') return renderChoice(screen);
   return renderTyping(screen);
 }
 
@@ -427,59 +507,62 @@ function wordDetails(word, screen = null, { sibling = false, rule = true } = {})
   ];
 }
 
-function renderIntro(screen, { again = false } = {}) {
+// After a wrong multiple choice or "Weet ik niet": the word itself, with its sentence, gender,
+// notes and audio. It comes back as a multiple choice next round (§6.2).
+function renderShownWord(screen, { dontKnow = false } = {}) {
   const T = S.session;
   const { word } = screen;
-  const go = () => {
-    if (again) return showScreen(session.next());
-    session.answerIntro(screen, 'continue', elapsed());
-    showScreen(session.next());
-  };
+  hideToast();
   show(
     sessionHeader(),
     card({
-      label: again ? T.wrong : T.newWordLevel(levelOf(word)),
+      label: dontKnow ? T.shownLabel : T.wrong,
       sentence: () => germanSentence(word),
       word: lockup(word),
       revealed: word,
-      extra: [again && h('p', { class: 'message', role: 'status' }, T.mcWrong), ...wordDetails(word)],
+      extra: [!dontKnow && h('p', { class: 'message', role: 'status' }, T.mcWrong), ...wordDetails(word)],
     }),
-    h('div', { class: 'bottom' },
-      h('button', { class: 'primary', id: 'next', onclick: go }, T.next),
-      !again && h('button', {
-        id: 'tooEasy',
-        onclick: () => {
-          session.answerIntro(screen, 'tooEasy', elapsed());
-          toast(T.tooEasyLater, 2000);
-          showScreen(session.next());
-        },
-      }, T.tooEasy)),
+    h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'next', onclick: () => showScreen(session.next()) }, T.next)),
   );
   hideKeyRow();
   document.getElementById('next').focus();
   say(word);
 }
 
+// Multiple choice. A new word's first question also has "Ken ik al" (Te makkelijk: typed next
+// round); every multiple choice has "Weet ik niet".
 function renderChoice(screen) {
   const T = S.session;
   const { word } = screen;
   quietFor(word);
+  const answer = (i) => {
+    const r = session.answerChoice(screen, i, elapsed());
+    say(word);
+    if (r.correct) {
+      toast(`${T.correct} ✓`, 1200);
+      showScreen(session.next());
+    } else {
+      renderShownWord(screen, { dontKnow: i < 0 });
+    }
+  };
   show(
     sessionHeader(),
-    card({ label: T.chooseLabel, sentence: () => dutchSentence(word), screen, word: promptWord(word), extra: [promptHint(word)] }),
-    h('div', { class: 'choices bottom' }, screen.options.map((o, i) => h('button', {
-      class: 'choice',
-      onclick: () => {
-        const r = session.answerChoice(screen, i, elapsed());
-        say(word);
-        if (r.correct) {
-          toast(`${T.correct} ✓`, 1200);
-          showScreen(session.next());
-        } else {
-          renderIntro(screen, { again: true });
-        }
-      },
-    }, o))),
+    card({
+      label: screen.step === 'intro' ? T.newWordLevel(levelOf(word)) : T.chooseLabel,
+      sentence: () => dutchSentence(word), screen, word: promptWord(word), extra: [promptHint(word)],
+    }),
+    h('div', { class: 'choices bottom' },
+      screen.options.map((o, i) => h('button', { class: 'choice', onclick: () => answer(i) }, o)),
+      h('div', { class: 'choice-extra' },
+        h('button', { class: 'link', id: 'dontKnow', type: 'button', onclick: () => answer(-1) }, T.dontKnow),
+        screen.step === 'intro' && h('button', {
+          class: 'link', id: 'tooEasy', type: 'button',
+          onclick: () => {
+            session.answerIntro(screen, 'tooEasy', elapsed());
+            toast(T.knowItLater, 2000);
+            showScreen(session.next());
+          },
+        }, T.knowIt))),
   );
   hideKeyRow();
 }
@@ -505,7 +588,7 @@ function renderTyping(screen, { message = null } = {}) {
     say(word);
     renderReveal(screen, r, typed);
   } }, input, h('button', { class: 'primary', type: 'submit' }, T.check));
-  const label = screen.step === 'tooEasy' ? T.tooEasyPrompt : screen.step === 'relearn' ? T.relearn : '';
+  const label = screen.step === 'tooEasy' ? T.tooEasyPrompt : screen.step === 'relearn' ? T.relearn : screen.step === 'type1' ? T.placeholder : '';
   show(
     sessionHeader(),
     card({
@@ -605,9 +688,10 @@ function skipLevelOffer(screen, ok) {
       id: 'skipLevel', type: 'button',
       onpointerdown: (e) => e.preventDefault(), // keep the keyboard up
       onclick: () => {
-        const easyLevels = session.skipLevel(n);
+        const { easyLevels, learnLevel } = session.skipLevel(n);
         sessionSettings.easyLevels = easyLevels;
         db.setSetting('easyLevels', easyLevels).catch((e) => toast(S.error(e.message)));
+        db.setSetting('learnLevel', learnLevel).catch((e) => toast(S.error(e.message)));
         box.replaceChildren(h('p', { class: 'small', role: 'status' }, T.skippedLevel(n)));
         document.getElementById('answer')?.focus();
       },
@@ -622,15 +706,68 @@ function answerInput() {
   });
 }
 
+// One line per word: German – Dutch, with ✓ or ✗ (round summary, Toets result).
+function resultList(rows, id) {
+  const T = S.session;
+  return h('ul', { class: 'results', id }, rows.map((r) => {
+    const w = session.wordsById.get(r.wordId);
+    const note = r.graduated ? T.resultKnown : r.known ? T.resultKnowIt : null;
+    return h('li', { class: r.ok ? 'ok' : 'miss' },
+      h('span', { class: 'mark', 'aria-hidden': 'true' }, r.ok ? '✓' : '✗'),
+      h('span', { lang: 'de' }, displayForm(w)), h('span', { class: 'muted' }, ` – ${promptWord(w)}`),
+      note && h('span', { class: 'muted small' }, ` · ${note}`));
+  }));
+}
+
+// The level's progress, as on Home (round summary, end of Leren).
+function levelLine() {
+  const n = session.level ?? levelOf(session.wordsById.get(session.roundResults[0]?.wordId ?? session.words[0].id));
+  const p = levelProgress(session.words, session.cards, n);
+  return [h('p', { class: 'small', id: 'roundLevel' }, S.home.levelName({ level: n, cefr: null })), progressBar(p, 'roundBar'), h('p', { class: 'muted small' }, S.home.progress(p))];
+}
+
+// After each round of Leren: how it went, and the level's progress (§6.2).
+function renderRound(screen) {
+  const T = S.session;
+  hideToast();
+  hideKeyRow();
+  const ok = screen.results.filter((r) => r.ok).length;
+  const go = () => {
+    session.nextRound();
+    showScreen(session.next());
+  };
+  show(
+    sessionHeader(),
+    h('h1', {}, T.roundTitle(screen.round)),
+    h('p', { class: 'big', id: 'roundStats' }, T.roundStats(ok, screen.results.length)),
+    resultList(screen.results, 'roundResults'),
+    ...levelLine(),
+    h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'nextRound', onclick: go }, screen.more ? T.nextRound : T.finish)),
+  );
+  document.getElementById('nextRound').focus();
+}
+
 function renderDone() {
   const T = S.session;
   const { done, ms, newWords } = session.stats;
   hideKeyRow();
+  hideToast();
+  const back = h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'back', onclick: endSession }, T.back));
+  if (session.mode === 'test') {
+    const missed = session.results.filter((r) => !r.ok);
+    return show(
+      h('h1', {}, T.testDoneTitle),
+      h('p', { class: 'big', id: 'doneStats' }, T.testScore(session.results.length - missed.length, session.results.length)),
+      missed.length ? [h('p', {}, T.testMissed), resultList(missed, 'testMissed')] : h('p', {}, T.testAllRight),
+      back,
+    );
+  }
   show(
-    h('h1', {}, T.doneTitle),
+    h('h1', {}, session.mode === 'review' ? T.reviewDoneTitle : T.learnDoneTitle),
     h('p', { class: 'big', id: 'doneStats' }, T.doneStats(done, Math.max(done ? 1 : 0, Math.round(ms / 60000)))),
     newWords > 0 && h('p', { class: 'muted' }, T.doneNew(newWords)),
-    h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'back', onclick: endSession }, T.back)),
+    session.mode === 'learn' && !done && h('p', { class: 'muted' }, T.learnDoneNone),
+    back,
   );
 }
 
