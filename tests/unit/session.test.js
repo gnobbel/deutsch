@@ -265,6 +265,15 @@ test('"Ik had gelijk" on a learning step: the miss does not count', async () => 
   assert.equal(store.log.find((r) => r.grade != null).grade, Grade.Good);
 });
 
+test('the review log says why an answer was wrong (article, umlaut), for §2', async () => {
+  const words = base.map((w) => (w.id === 3 ? { ...w, de: 'schön', nl: ['mooi'] } : w));
+  const { s, store } = session({ words, cards: [reviewCard(6, 10), reviewCard(3, 10)], settings: { newPerDay: 0 } });
+  s.answerTyped(s.next(), 'die Montag', 1000);
+  s.answerTyped(s.next(), 'schon', 1000);
+  await s.flush();
+  assert.deepEqual(store.log.map((r) => [r.outcome, r.reason]), [['wrong', 'article'], ['wrong', 'umlaut']]);
+});
+
 test('"Ik had gelijk" on a lapse: graded Good instead, answer accepted from then on, reported', async () => {
   const { s, store } = session({ cards: [reviewCard(1, 10)], settings: { newPerDay: 0 } });
   const sc = s.next();

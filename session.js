@@ -520,7 +520,8 @@ export class Session {
       item.after = item.step;
       this.setStep(item, 'mc', this.shown + GAP.typeMiss);
     }
-    const { key, row } = this.log(screen, ms, { answer: input, outcome: result.outcome, grade: rated });
+    // `reason` (article, umlaut, plural, form) is what §2 needs to decide on a gender drill.
+    const { key, row } = this.log(screen, ms, { answer: input, outcome: result.outcome, grade: rated, reason: result.reason });
     this.last = { screen, input, result, prevCard, relearn, logKey: key, logRow: row, at: now };
     return { ...result, rated, graduated: rated != null && item.kind === 'learn' };
   }
