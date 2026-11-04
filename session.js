@@ -12,7 +12,10 @@ export const WORD_FILES = ['words/words-0001-0500.json', 'words/words-0501-1000.
 
 export const REVIEWS_PER_NEW = 4;
 // How many other cards must come in between (§6.2).
-export const GAP = { type1: 3, type2: 8, mcAgain: 3, typeMiss: 2, relearn: 5 };
+// tooEasy: the Te makkelijk check comes after a few other cards, not straight after the intro
+// that showed the German word, so it tests memory rather than what is still on screen in the
+// learner's head (§6.2).
+export const GAP = { type1: 3, type2: 8, mcAgain: 3, typeMiss: 2, relearn: 5, tooEasy: 3 };
 export const LEARN_STEPS = ['intro', 'mc', 'type1', 'type2', 'tooEasy'];
 const STEPS_LEFT = { intro: 4, tooEasy: 4, mc: 3, type1: 2, type2: 1, relearn: 1 };
 
@@ -77,11 +80,12 @@ export function startLevelOf(levelList, easyLevels) {
 
 // True when the last EASY_STREAK words introduced from this level (not via the scan) all passed
 // Te makkelijk, and the level still has new words: then the app offers to skip the rest of it.
-export function levelLooksEasy(level, words, wordStates, easyLevels = []) {
+// `pending`: ids of words whose Te makkelijk check hasn't come yet; they don't count either way.
+export function levelLooksEasy(level, words, wordStates, easyLevels = [], pending = new Set()) {
   if (level == null || easyLevels.includes(level)) return false;
   const inLevel = new Set(words.filter((w) => levelOf(w) === level).map((w) => w.id));
   const recent = [...wordStates.values()]
-    .filter((ws) => ws.introducedOn && !ws.levelCheck && inLevel.has(ws.wordId))
+    .filter((ws) => ws.introducedOn && !ws.levelCheck && inLevel.has(ws.wordId) && !pending.has(ws.wordId))
     .sort((a, b) => new Date(b.introducedOn) - new Date(a.introducedOn))
     .slice(0, EASY_STREAK);
   const easy = new Set(easyLevels);
@@ -376,7 +380,8 @@ export class Session {
 
   // "Dit niveau lijkt te makkelijk" (§6.1), for the level of the word just answered.
   levelLooksEasy(level) {
-    return levelLooksEasy(level, this.words, this.wordStates, [...this.easy]);
+    const pending = new Set(this.learning.filter((i) => i.step === 'tooEasy').map((i) => this.cards.get(i.cardId).wordId));
+    return levelLooksEasy(level, this.words, this.wordStates, [...this.easy], pending);
   }
 
   // Skips the rest of a level from now on: its words no longer come as new words in this session
@@ -430,7 +435,8 @@ export class Session {
   answerIntro(screen, action, ms = 0) {
     this.log(screen, ms, { outcome: action });
     this.resolved(screen, ms);
-    this.setStep(screen.item, action === 'tooEasy' ? 'tooEasy' : 'mc', this.shown);
+    if (action === 'tooEasy') this.setStep(screen.item, 'tooEasy', this.shown + GAP.tooEasy);
+    else this.setStep(screen.item, 'mc', this.shown);
     return { action };
   }
 

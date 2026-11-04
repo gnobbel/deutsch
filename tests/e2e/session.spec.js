@@ -285,24 +285,48 @@ test('a level marked too easy: its words are scanned quickly instead of coming a
 test('five new words in a row known: the app offers to skip the rest of the level', async ({ page }) => {
   await openApp(page);
   await page.getByRole('button', { name: 'Start' }).click();
-  for (let i = 0; i < 5; i++) {
-    await expect(page.locator('#tooEasy')).toBeVisible();
-    const w = byGerman.get((await page.locator('.card .context').textContent()).trim());
-    await page.locator('#tooEasy').click();
+  // Every intro gets Te makkelijk. Its typed check comes a few cards later (§6.2), so intros and
+  // checks interleave; after the fifth passed check the app offers to skip the level.
+  let passed = 0;
+  let checkedToast = false;
+  for (let steps = 0; steps < 40 && passed < 5; steps++) {
+    if (await page.locator('#tooEasy').isVisible()) {
+      await page.locator('#tooEasy').click();
+      if (!checkedToast) {
+        await expect(page.locator('.toast')).toHaveText('Over een paar kaarten vragen we dit woord even.');
+        checkedToast = true;
+      }
+      continue;
+    }
+    await expect(page.locator('.card .label')).toHaveText('Ken je dit al? Typ het Duitse woord.');
+    if (await page.locator('#showSentence').isVisible()) await page.locator('#showSentence').click();
+    const w = byPrompt.get(`${(await page.locator('#word').textContent()).trim()}|${(await page.locator('.card .context').textContent()).trim()}`);
+    expect(w).toBeTruthy();
     await page.locator('#answer').fill(displayForm(w));
     await page.locator('#answer').press('Enter');
     await expect(page.locator('.card .label')).toHaveText('Goed, dit woord zit erin');
-    if (i < 4) {
+    passed++;
+    if (passed < 5) {
       await expect(page.locator('#skipLevel')).toHaveCount(0);
       await page.locator('#answer').press('Enter');
     }
   }
+  expect(passed).toBe(5);
   await expect(page.locator('#skipLevel')).toHaveText('Rest van niveau 1 overslaan');
   await page.screenshot({ path: 'test-results/screens/session-skip-level.png' });
   await page.locator('#skipLevel').click();
   await expect(page.locator('#skipLevelBox')).toContainText('Niveau 1 wordt overgeslagen');
   await waitForSetting(page, 'easyLevels', [1]);
   await page.locator('#answer').press('Enter');
+  // Checks of words introduced before the skip may still come; the next new word is from level 2.
+  for (let steps = 0; steps < 10 && !(await page.locator('#tooEasy').isVisible()); steps++) {
+    if (await page.locator('#showSentence').isVisible()) await page.locator('#showSentence').click();
+    const w = byPrompt.get(`${(await page.locator('#word').textContent()).trim()}|${(await page.locator('.card .context').textContent()).trim()}`);
+    await page.locator('#answer').fill(displayForm(w));
+    await page.locator('#answer').press('Enter');
+    await expect(page.locator('.card.revealed')).toBeVisible();
+    await page.locator('#answer').press('Enter');
+  }
   await expect(page.locator('.card .label')).toHaveText('Nieuw woord · niveau 2');
   await page.getByRole('button', { name: 'Stoppen' }).click();
   await expect(page.locator('#scanBox')).toBeVisible();

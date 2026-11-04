@@ -165,7 +165,9 @@ async function renderHome() {
   const easyLevels = st.settings.easyLevels || [];
   const cur = currentLevel(st.words, wordStates, easyLevels);
   const level = cur && levels(st.words, wordStates, easyLevels).find((l) => l.level === cur);
-  const looksEasy = level && levelLooksEasy(cur, st.words, wordStates, easyLevels);
+  // A Te makkelijk check cut off by the end of a session starts again from the intro: not decided yet.
+  const pending = new Set(st.cards.filter((c) => c.step === 'tooEasy').map((c) => c.wordId));
+  const looksEasy = level && levelLooksEasy(cur, st.words, wordStates, easyLevels, pending);
   show(
     waitingWorker && h('button', { class: 'banner', id: 'update', onclick: applyUpdate },
       h('strong', {}, T.updateAvailable),
@@ -442,6 +444,7 @@ function renderIntro(screen, { again = false } = {}) {
         id: 'tooEasy',
         onclick: () => {
           session.answerIntro(screen, 'tooEasy', elapsed());
+          toast(T.tooEasyLater, 2000);
           showScreen(session.next());
         },
       }, T.tooEasy)),

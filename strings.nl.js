@@ -63,6 +63,7 @@ export const S = {
     next: 'Verder',
     tooEasy: 'Te makkelijk',
     tooEasyPrompt: 'Ken je dit al? Typ het Duitse woord.',
+    tooEasyLater: 'Over een paar kaarten vragen we dit woord even.',
     relearn: 'Nog een keer',
     chooseLabel: 'Kies het Duitse woord',
     answerLabel: 'Duits woord',

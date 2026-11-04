@@ -151,6 +151,27 @@ test('Te makkelijk: one correct answer → Easy, not counted, so another new wor
   assert.ok(seen.some((x) => x.id === 2 && x.step === 'type2'), 'word 2 introduced and learned');
 });
 
+test('Te makkelijk: the check comes after a few other cards, not straight after the intro', async () => {
+  // With reviews to do, the typed check waits GAP.tooEasy cards, so it tests memory rather than
+  // the German word that was on screen a moment ago (§6.2).
+  const cards = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29].map((id) => reviewCard(id, 10));
+  const { s, store } = session({ cards, settings: { newPerDay: 1 } });
+  const seen = await play(s, (sc) => (sc.step === 'intro' ? 'tooEasy' : null));
+  const intro = seen.findIndex((x) => x.step === 'intro');
+  const check = seen.findIndex((x) => x.step === 'tooEasy');
+  assert.ok(intro >= 0 && check > intro);
+  assert.equal(check - intro - 1, GAP.tooEasy, 'other cards in between');
+  assert.equal(store.words.get(1).tooEasy, true);
+});
+
+test('Te makkelijk: a check that is still open does not count for "Dit niveau lijkt te makkelijk"', () => {
+  const t = (id) => new Date(NOW.getTime() + id * 1000);
+  const ws = new Map([1, 2, 3, 4, 5].map((id) => [id, { wordId: id, introducedOn: t(id), tooEasy: true }]));
+  ws.set(6, { wordId: 6, introducedOn: t(6), tooEasy: false });
+  assert.equal(levelLooksEasy(1, base, ws), false, 'word 6 was learned normally');
+  assert.equal(levelLooksEasy(1, base, ws, [], new Set([6])), true, 'word 6 is still waiting for its check');
+});
+
 test('Te makkelijk answered wrong → the normal learning steps', async () => {
   const { s, store } = session({ settings: { newPerDay: 1 } });
   const seen = await play(s, (sc) => (sc.step === 'intro' ? 'tooEasy' : sc.step === 'tooEasy' ? 'slecht' : null));
@@ -327,11 +348,13 @@ test('"Dit niveau lijkt te makkelijk": the last 5 new words of a level all passe
   const { s, store } = session({ words: many, settings: { newPerDay: 7 } });
   let offeredAfter = null;
   const intros = [];
+  let introsAfterSkip = null;
   for (let i = 0; i < 40; i++) {
     const sc = s.next();
     if (!sc) break;
     if (sc.step === 'intro') {
       intros.push(sc.word.id);
+      introsAfterSkip?.push(sc.word.id);
       s.answerIntro(sc, 'tooEasy', 1000);
       continue;
     }
@@ -339,13 +362,16 @@ test('"Dit niveau lijkt te makkelijk": the last 5 new words of a level all passe
     if (offeredAfter == null && s.levelLooksEasy(levelOf(sc.word))) {
       offeredAfter = sc.word.id;
       assert.deepEqual(s.skipLevel(1), [1]);
+      introsAfterSkip = [];
     }
   }
   await s.flush();
   // (Word 3 waits a day: it is in the same confusable set as word 2.)
   assert.deepEqual(intros.slice(0, 5), [1, 2, 4, 5, 6]);
   assert.equal(offeredAfter, 6, 'offered once five words were known');
-  assert.deepEqual(intros.slice(5, 7), [101, 102], 'the next new words come from level 2');
+  // The checks come a few cards after their intro, so words 7 and 8 were already introduced.
+  assert.ok(introsAfterSkip.length >= 1);
+  assert.ok(introsAfterSkip.every((id) => id > 100), 'the next new words come from level 2');
   assert.equal(store.words.get(1).tooEasy, true);
 });
 

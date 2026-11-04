@@ -209,7 +209,7 @@ If the session ends first, the word stays in learning and continues at the start
 
 **Decided (Stage 2):** an Almost in a learning typing step counts as passed (after retyping); only Wrong sends the word back to multiple choice. When nothing else is left in the session, a waiting step comes right away instead of after its 3 or 8 other cards ("near the session's end").
 
-**"Te makkelijk"** asks for **one typed answer** with the intro hidden. Correct (article included) → it skips learning and goes to review with an Easy first rating (its recognition card too, if it has one), and **doesn't count toward the daily limit**. Otherwise → the normal learning steps.
+**"Te makkelijk"** asks for **one typed answer** with the intro hidden, **after at least 3 other cards** (`GAP.tooEasy`; right away only when nothing else is left in the session). Typing a word you saw two seconds ago tests what is still in short-term memory, not whether you knew it: recall drops sharply within seconds once other material comes in between (Peterson & Peterson 1959), and judgments of "I know this" made right after seeing the answer are much less accurate than delayed ones (Nelson & Dunlosky 1991, the delayed-JOL effect). A passed check skips about two weeks of practice (Easy first rating), so it has to be a real test. Correct (article included) → it skips learning and goes to review with an Easy first rating (its recognition card too, if it has one), and **doesn't count toward the daily limit**. Otherwise → the normal learning steps. A check that hasn't come yet doesn't count for "Dit niveau lijkt te makkelijk" (§6.1).
 
 **Words marked known** (word detail, Stage 3) skip the intro and go straight to review with a moderate initial stability.
 
