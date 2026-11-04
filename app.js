@@ -527,8 +527,10 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
       : r.outcome === 'almost' ? T.almost
         : r.reason === 'article' ? T.wrongArticle
           : r.reason === 'umlaut' ? T.wrongUmlaut
-            : r.sibling ? T.wrongSibling(r.sibling)
-              : r.outcome === 'wrongReal' ? T.wrongReal : T.wrong;
+            : r.reason === 'plural' ? T.wrongPlural
+              : r.reason === 'form' ? T.wrongForm
+                : r.sibling ? T.wrongSibling(r.sibling)
+                  : r.outcome === 'wrongReal' ? T.wrongReal : T.wrong;
   const target = r.target;
   const shownAnswer = r.outcome === 'almost' && !overridden
     ? h('p', { class: 'answer-line' }, T.youTyped, ': ', h('span', { class: 'typed' }, typed), ' → ',
@@ -563,7 +565,7 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
       extra: [
         overridden && h('p', { class: 'message', id: 'overridden', role: 'status' }, T.overridden(overridden)),
         shownAnswer,
-        r.note && !overridden && h('p', { class: 'note-line' }, T.spelling(r.note)),
+        r.note && !overridden && h('p', { class: 'note-line' }, r.variant ? T.variant(r.note) : T.spelling(r.note)),
         skipLevelOffer(screen, ok),
         ...wordDetails(word, screen, { sibling: !!r.sibling && !overridden, rule: !ok }),
       ],

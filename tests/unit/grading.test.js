@@ -191,3 +191,39 @@ test('context sets: an acceptAlso that is also a sibling is a different valid wo
   assert.equal(grade('seit', set[1], { index: idx }).outcome, 'different');
   assert.equal(grade('seitdem', set[0], { index: idx }).sibling, 'seitdem');
 });
+
+test('sentence punctuation at the end is ignored (iOS types ". " on a double space)', () => {
+  assert.equal(normalize('das Handy. '), 'das handy');
+  assert.equal(outcome('das Handy.', 'Handy'), 'correct');
+  assert.equal(outcome('dass.', 'dass'), 'correct', 'too short for typo tolerance, still correct');
+  assert.equal(outcome('müde!', 'müde'), 'correct');
+  const q = W({ id: 30, pos: 'phrase', de: 'wie bitte?', nl: ['wat zeg je?'] });
+  assert.equal(grade('wie bitte', q, { index }).outcome, 'correct');
+  assert.equal(grade('wie bitte?', q, { index }).outcome, 'correct');
+  assert.equal(outcome('das Hand.', 'Handy'), 'wrongReal', 'a real mix-up stays a mix-up');
+});
+
+test('variants: another spelling or form of the same word is correct, with the dictionary form', () => {
+  const gern = W({ id: 31, pos: 'adv', de: 'gern', nl: ['graag'], variants: ['gerne'] });
+  const bekannte = W({ id: 32, pos: 'noun', de: 'Bekannte', article: 'der', plural: 'Bekannten', nl: ['kennis'], variants: ['die Bekannte'] });
+  const idx = buildIndex([...words, gern, bekannte]);
+  assert.deepEqual((({ outcome: o, variant, note }) => ({ o, variant, note }))(grade('gerne', gern, { index: idx })), { o: 'correct', variant: true, note: 'gern' });
+  assert.equal(grade('die Bekannte', bekannte, { index: idx }).outcome, 'correct');
+  assert.equal(grade('das Bekannte', bekannte, { index: idx }).outcome, 'wrong', 'the article still counts');
+  assert.equal(grade('gerne', byDe.schön, { index: idx }).outcome, 'wrongReal', 'a variant is a real word for other prompts');
+});
+
+test('the article may start with a capital when capitalisation counts', () => {
+  assert.equal(outcome('Das Handy', 'Handy', { ignoreCase: false }), 'correct');
+  assert.notEqual(outcome('das handy', 'Handy', { ignoreCase: false }), 'correct', 'the noun itself still needs its capital');
+});
+
+test('the plural or a conjugated form: said so, and no "Ik had gelijk"', () => {
+  assert.deepEqual((({ outcome: o, reason, canOverride }) => ({ o, reason, canOverride }))(g('die Stühle', 'Stuhl')), { o: 'wrongReal', reason: 'plural', canOverride: false });
+  assert.equal(g('Stühle', 'Stuhl').reason, 'plural');
+  for (const f of ['fährt', 'er fährt', 'fuhr', 'gefahren']) {
+    const r = g(f, 'fahren');
+    assert.deepEqual([r.outcome, r.reason, r.canOverride], ['wrongReal', 'form', false], f);
+  }
+  assert.equal(g('fängt an', 'anfangen').reason, 'form');
+});

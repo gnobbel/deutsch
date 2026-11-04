@@ -59,6 +59,11 @@ export function validateWords(entries, { range = null, seenIds = new Set(), seen
     if (!Array.isArray(w.nl) || !w.nl.length || !w.nl.every(isStr)) err('nl must be a non-empty list');
     if (!['de', 'het', null].includes(w.nlArticle)) err('nlArticle must be "de", "het" or null');
     if (!Array.isArray(w.acceptAlso) || !w.acceptAlso.every(isStr)) err('acceptAlso must be a list of strings');
+    // variants: other spellings or forms of this same word (gerne for gern), graded correct.
+    if (w.variants !== undefined) {
+      if (!Array.isArray(w.variants) || !w.variants.length || !w.variants.every(isStr)) err('variants must be a non-empty list of strings or absent');
+      else for (const v of w.variants) if ((w.acceptAlso || []).includes(v)) err(`"${v}" is in both variants and acceptAlso`);
+    }
     if (!isBool(w.showInitial)) err('showInitial must be true/false');
     if (!isBool(w.cognate)) err('cognate must be true/false');
     if (!isBool(w.check)) err('check must be true/false');
@@ -106,6 +111,7 @@ export function validateWords(entries, { range = null, seenIds = new Set(), seen
       if (isStr(w.de) && w.de[0] !== w.de[0].toUpperCase()) err('noun must be capitalised');
       // Noun answers are typed with their article, so noun alternatives carry one too.
       for (const a of w.acceptAlso || []) if (/^[A-ZÄÖÜ]/.test(a)) err(`acceptAlso "${a}" needs its article`);
+      for (const a of w.variants || []) if (/^[A-ZÄÖÜ]/.test(a)) err(`variant "${a}" needs its article`);
     } else if (w.article !== undefined || w.plural !== undefined) err('only nouns have article/plural');
 
     if (w.pos === 'verb') {

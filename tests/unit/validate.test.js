@@ -147,3 +147,10 @@ test('context sets: same prompt allowed inside a set, with one shared rule; no h
   assert.match(errs([prep(1, 'zu', 'Ich gehe [[zu]] Anna.', { showInitial: true })]), /showInitial: false/);
   assert.match(errs([prep(1, 'zu', 'Ich gehe [[zu]] Anna.', { contextSet: undefined })]), /rule only goes with contextSet/);
 });
+
+test('variants: a list of strings, nouns with their article, not also in acceptAlso', () => {
+  assert.deepEqual(validateWords([{ ...handy(), variants: ['das Händy'] }]), []);
+  assert.match(errs([{ ...handy(), variants: ['Mobil'] }]), /variant "Mobil" needs its article/);
+  assert.match(errs([{ ...handy(), variants: [] }]), /variants must be a non-empty list/);
+  assert.match(errs([{ ...handy(), acceptAlso: ['das Mobil'], variants: ['das Mobil'] }]), /in both variants and acceptAlso/);
+});

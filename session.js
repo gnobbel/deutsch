@@ -246,7 +246,7 @@ export function planToday({ words, wordStates, cards, settings, seconds, now }) 
 export function mcOptions(word, words, random = Math.random) {
   const right = displayForm(word);
   const prompt = normalize(word.nl[0]);
-  const valid = new Set([right, ...(word.acceptAlso || [])].map((s) => normalize(s)));
+  const valid = new Set([right, ...(word.acceptAlso || []), ...(word.variants || [])].map((s) => normalize(s)));
   const usable = (w) => w.id !== word.id && !w.clozeOnly && w.de !== word.de && !w.nl.some((n) => normalize(n) === prompt)
     && !valid.has(normalize(displayForm(w)));
   const pick = (pool, n) => {

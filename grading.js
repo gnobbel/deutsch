@@ -3,9 +3,11 @@
 export const ARTICLES = ['der', 'die', 'das'];
 const SPELLED = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue' };
 
-// Trim, collapse spaces, NFC, typographic apostrophes → plain ones; optionally ignore case.
+// Trim, collapse spaces, NFC, typographic apostrophes → plain ones, no sentence punctuation at
+// the end (iOS types ". " on a double space; "wie bitte?" invites a "?"); optionally ignore case.
 export function normalize(s, { ignoreCase = true } = {}) {
-  const t = String(s ?? '').normalize('NFC').replace(/[’‘ʼ´`]/g, "'").replace(/\s+/g, ' ').trim();
+  const t = String(s ?? '').normalize('NFC').replace(/[’‘ʼ´`]/g, "'").replace(/\s+/g, ' ').trim()
+    .replace(/\s*[.!?]+$/, '');
   return ignoreCase ? t.toLocaleLowerCase('de-DE') : t;
 }
 
@@ -85,6 +87,7 @@ export function buildIndex(words) {
       byNl.get(k).push(w);
     }
     addReal(w.de, w.id);
+    for (const v of w.variants || []) addReal(v.replace(/^(der|die|das) /, ''), w.id);
     addReal(w.plural, w.id);
     if (w.forms) for (const f of ['pres3', 'praet', 'part']) addReal(w.forms[f], w.id);
   }
@@ -105,15 +108,19 @@ function splitArticle(s) {
 
 // Grades a typed answer on a production card (Dutch prompt → German word), §7.2.
 // opts: { index, ignoreCase, umlautShortcuts, accepted: [answers allowed via "Ik had gelijk"] }
-// Returns { outcome: 'correct'|'different'|'wrongReal'|'almost'|'wrong', note, canOverride, reason, target, sibling? }.
-// note: the proper spelling after an umlaut shortcut; reason: 'article' | 'umlaut' | null;
+// Returns { outcome: 'correct'|'different'|'wrongReal'|'almost'|'wrong', note, variant, canOverride, reason, target, sibling? }.
+// note: the proper spelling after an umlaut shortcut; variant: true when the answer was one of the
+// word's `variants` (gerne for gern; the dictionary form is then shown as a note);
+// reason: 'article' | 'umlaut' | 'plural' (the noun's plural) | 'form' (a conjugated form of the verb) | null;
 // sibling: the other context-set word that was typed (shown with the set's rule).
 export function grade(rawInput, word, opts = {}) {
   const { index, ignoreCase = true, umlautShortcuts = true, accepted = [] } = opts;
   const norm = (s) => normalize(s, { ignoreCase });
-  const input = norm(rawInput);
+  // The article is lowercase in the data; "Das Haus" (a capital at the start) is still the right
+  // article when capitalisation counts.
+  const input = norm(rawInput).replace(/^(der|die|das) /i, (a) => a.toLocaleLowerCase('de-DE'));
   const target = displayForm(word);
-  const result = (outcome, extra = {}) => ({ outcome, note: null, canOverride: false, reason: null, target, ...extra });
+  const result = (outcome, extra = {}) => ({ outcome, note: null, variant: false, canOverride: false, reason: null, target, ...extra });
   if (!input) return result('wrong');
 
   const forms = answerForms(word).map(norm);
@@ -124,9 +131,13 @@ export function grade(rawInput, word, opts = {}) {
   }
   if (accepted.some((a) => norm(a) === input)) return result('correct');
 
+  // Another spelling or form of this same word (gerne, zuhause, die Bekannte, meine): correct,
+  // with the dictionary form shown. Telling him "we want another word" would leave no way out.
+  const matches = (o) => matchForm(input, norm(o), { shortcut: umlautShortcuts });
+  if ((word.variants || []).some(matches)) return result('correct', { variant: true, note: target });
+
   // A listed alternative (acceptAlso) is a different valid word: no grade, try again. It comes
   // before the context-set check: "seit" is also right where "seitdem" is asked.
-  const matches = (o) => matchForm(input, norm(o), { shortcut: umlautShortcuts });
   if ((word.acceptAlso || []).some(matches)) return result('different');
 
   // Another word of the same context set (naar → zu / nach): the sentence decides, so it is a
@@ -150,6 +161,13 @@ export function grade(rawInput, word, opts = {}) {
 
   // Not offered when the only error is the article or an umlaut/ß: those are what the app teaches.
   if (isNoun && partRight) return result('wrong', { reason: 'article' });
+  // The plural (die Stühle for der Stuhl), or a conjugated form of the verb (fährt, gefahren for
+  // fahren): the right word in the wrong form. Said so, and not offered for "Ik had gelijk",
+  // which would accept that form for good.
+  if (isNoun && word.plural && matchForm(rest, norm(word.plural), { shortcut: umlautShortcuts })) return result('wrongReal', { reason: 'plural' });
+  if (word.forms && ['pres3', 'praet', 'part'].some((f) => word.forms[f] && matchForm(input.replace(/^(er|sie|es|ich) /, ''), norm(word.forms[f]), { shortcut: umlautShortcuts }))) {
+    return result('wrongReal', { reason: 'form' });
+  }
   if (wanted.some((w) => umlautSlip(typed, w))) return result('wrong', { reason: isNoun && !articleOk ? 'article' : 'umlaut' });
 
   // Another real German word (or another form of this one): typo tolerance must never reward it.
