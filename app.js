@@ -2,11 +2,14 @@
 import { openDb } from './db.js';
 import { S, formatDate } from './strings.nl.js';
 import {
-  h, lockup, promptWord, promptHint, relatedNote, germanSentence, dutchSentence, deHetNote, falseFriendNote, infoBar, genderClass, spoken,
+  h, lockup, promptWord, promptHint, relatedNote, germanSentence, dutchSentence, deHetNote, falseFriendNote, ruleNote, infoBar, genderClass, spoken,
 } from './cards.js';
-import { Session, WORD_FILES, planToday, levels, currentLevel, levelOf } from './session.js';
+import {
+  Session, WORD_FILES, planToday, levels, currentLevel, levelOf, levelLooksEasy, levelsBelow, startLevelOf, START_LEVELS,
+  scanBatch, applyScan, SCAN_PAGE,
+} from './session.js';
 import { secondsPerCard, estimateMinutes } from './srs.js';
-import { grade, diffParts } from './grading.js';
+import { grade, diffParts, displayForm } from './grading.js';
 import { speak, stop as stopSpeech, germanVoices } from './tts.js';
 
 const view = document.getElementById('view');
@@ -58,7 +61,7 @@ function currentTab() {
 }
 
 async function route() {
-  if (session) return; // a running session owns the screen until it ends
+  if (session || scan) return; // a running session or scan owns the screen until it ends
   if (!(await db.getMeta('firstRunDone'))) {
     tabs.hidden = true;
     view.classList.add('full');
@@ -157,11 +160,12 @@ async function renderHome() {
     words: st.words, wordStates, cards: new Map(st.cards.map((c) => [c.id, c])),
     settings: st.settings, seconds: st.seconds, now: new Date(),
   });
-  const minutes = estimateMinutes([...plan.reviews, ...plan.learning], plan.newToday, st.seconds, plan.checksToday);
-  const work = plan.reviews.length + plan.learning.length + plan.newToday + plan.checksToday;
+  const minutes = estimateMinutes([...plan.reviews, ...plan.learning], plan.newToday, st.seconds);
+  const work = plan.reviews.length + plan.learning.length + plan.newToday;
   const easyLevels = st.settings.easyLevels || [];
   const cur = currentLevel(st.words, wordStates, easyLevels);
   const level = cur && levels(st.words, wordStates, easyLevels).find((l) => l.level === cur);
+  const looksEasy = level && levelLooksEasy(cur, st.words, wordStates, easyLevels);
   show(
     waitingWorker && h('button', { class: 'banner', id: 'update', onclick: applyUpdate },
       h('strong', {}, T.updateAvailable),
@@ -171,19 +175,27 @@ async function renderHome() {
       ? h('div', { class: 'today', id: 'today' },
         h('p', { class: 'big' }, T.reviews(plan.reviews.length), h('span', { class: 'muted' }, ` · ${T.minutes(minutes)}`)),
         h('p', {}, T.newToday(plan.newToday)),
-        plan.checksToday > 0 && h('p', { id: 'checksToday' }, T.checksToday(plan.checksToday)),
         plan.learning.length > 0 && h('p', { class: 'muted' }, T.inProgress(new Set(plan.learning.map((c) => c.wordId)).size)))
       : h('p', { class: 'big', id: 'today' }, T.allDone),
     plan.paused && h('p', { class: 'note' }, T.paused),
-    h('p', { class: 'muted small', id: 'newLeft' }, T.newLeft(plan.newLeft), plan.checksLeft > 0 && ` ${T.checksLeft(plan.checksLeft)}`),
+    // The quick scan of levels marked too easy (§6.1).
+    plan.scanToday > 0 && h('div', { class: 'scan-box', id: 'scanBox' },
+      h('p', {}, h('strong', {}, T.scanToday(plan.scanToday))),
+      h('p', { class: 'muted small' }, T.scanTodayHint),
+      h('button', { id: 'scan', onclick: () => startScan(st, plan.scanToday) }, T.scanStart)),
+    plan.scanToday === 0 && plan.scanLeft > 0 && !plan.paused && h('p', { class: 'muted small', id: 'scanTomorrow' }, T.scanTomorrow),
+    h('p', { class: 'muted small', id: 'newLeft' }, T.newLeft(plan.newLeft), plan.scanLeft > 0 && ` ${T.scanLeft(plan.scanLeft)}`),
+    looksEasy && h('div', { class: 'note', id: 'looksEasy' },
+      h('p', {}, T.looksEasy(level.level)),
+      h('button', { id: 'looksEasyOk', onclick: () => markLevelEasy(level, easyLevels) }, T.looksEasyAction(level.level))),
     level && h('div', { class: 'level-row' },
       h('span', { class: 'muted small', id: 'level' }, T.level(level)),
-      h('button', { class: 'link', id: 'levelEasy', type: 'button', onclick: () => markLevelEasy(level, easyLevels) }, T.levelTooEasy)),
+      !looksEasy && h('button', { class: 'link', id: 'levelEasy', type: 'button', onclick: () => markLevelEasy(level, easyLevels) }, T.levelTooEasy)),
     h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'start', disabled: !work, onclick: () => startSession(st) }, T.start)),
   );
 }
 
-// "Woorden op dit niveau zijn te makkelijk": its unseen words become quick checks (§6.1).
+// "Woorden op dit niveau zijn te makkelijk": its unseen words go to the quick scan (§6.1).
 async function markLevelEasy(level, easyLevels) {
   const T = S.home;
   const ok = await confirmDialog({
@@ -193,6 +205,96 @@ async function markLevelEasy(level, easyLevels) {
   await db.setSetting('easyLevels', [...new Set([...easyLevels, level.level])].sort((a, b) => a - b));
   toast(T.levelDone(level.level));
   renderHome();
+}
+
+// ---------- the quick scan of levels marked too easy (PLAN §6.1) ----------
+
+// A page of up to SCAN_PAGE words, German with the Dutch next to it. The owner taps the ones he
+// doesn't know; "Volgende" stores the page (known → review, unknown → next new words) and shows
+// the next one, up to today's budget. Stopping keeps every stored page.
+let scan = null;
+
+function startScan(st, budget) {
+  scan = {
+    words: st.words,
+    wordStates: new Map(st.wordStates.map((w) => [w.wordId, w])),
+    easy: new Set(st.settings.easyLevels || []),
+    retention: st.settings.retention,
+    budget, done: 0, known: 0, missed: 0,
+  };
+  tabs.hidden = true;
+  view.classList.add('full');
+  renderScanPage();
+}
+
+function renderScanPage() {
+  const T = S.scan;
+  const page = scanBatch(scan.words, scan.wordStates, scan.easy, Math.min(SCAN_PAGE, scan.budget - scan.done));
+  if (!page.length) return renderScanDone();
+  const unknown = new Set();
+  const counts = h('p', { class: 'muted small', id: 'scanCounts' }, T.counts(page.length, 0));
+  const last = scan.done + page.length >= scan.budget || scanBatch(scan.words, scan.wordStates, scan.easy, page.length + 1).length <= page.length;
+  show(
+    h('div', { class: 'session-head' },
+      h('button', { class: 'icon', id: 'exit', type: 'button', 'aria-label': T.exit, onclick: endScan }, '✕'),
+      h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round((scan.done / scan.budget) * 100)) },
+        h('div', { style: `width:${((scan.done / scan.budget) * 100).toFixed(1)}%` })),
+      h('span', { class: 'muted small', id: 'scanProgress' }, T.progress(scan.done, scan.budget))),
+    h('h1', {}, T.title),
+    h('p', { class: 'small' }, T.intro),
+    h('div', { class: 'list scan-list', id: 'scanList' }, page.map((w) => {
+      const row = h('button', {
+        class: 'scan-row', type: 'button', 'aria-pressed': 'false', 'data-id': String(w.id),
+        onclick: () => {
+          if (unknown.has(w)) unknown.delete(w);
+          else unknown.add(w);
+          row.setAttribute('aria-pressed', String(unknown.has(w)));
+          counts.textContent = T.counts(page.length - unknown.size, unknown.size);
+        },
+      },
+      h('span', { class: 'scan-de', lang: 'de' }, displayForm(w)),
+      h('span', { class: 'scan-nl muted' }, promptWord(w)),
+      h('span', { class: 'scan-mark' }, T.unknown));
+      return row;
+    })),
+    counts,
+    h('div', { class: 'bottom' }, h('button', {
+      class: 'primary', id: 'scanNext',
+      onclick: async (e) => {
+        e.target.disabled = true;
+        const missed = page.filter((w) => unknown.has(w));
+        const known = page.filter((w) => !unknown.has(w));
+        const out = applyScan({ known, missed, wordStates: scan.wordStates, now: new Date(), retention: scan.retention });
+        try {
+          await Promise.all([...out.wordStates.map((w) => db.put('words', w)), ...out.cards.map((c) => db.put('cards', c))]);
+        } catch (err) {
+          e.target.disabled = false;
+          return toast(S.error(err.message));
+        }
+        for (const w of out.wordStates) scan.wordStates.set(w.wordId, w);
+        scan.done += page.length;
+        scan.known += known.length;
+        scan.missed += missed.length;
+        renderScanPage();
+      },
+    }, last ? T.finish : T.next)),
+  );
+}
+
+function renderScanDone() {
+  const T = S.scan;
+  show(
+    h('h1', {}, T.doneTitle),
+    h('p', { class: 'big', id: 'scanDone' }, T.doneStats(scan.known, scan.missed)),
+    h('p', { class: 'muted' }, T.doneHint),
+    h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'back', onclick: endScan }, T.back)),
+  );
+}
+
+function endScan() {
+  scan = null;
+  location.hash = '#leren';
+  route();
 }
 
 // ---------- the session (PLAN §6, §8.2, §10) ----------
@@ -268,9 +370,10 @@ function showScreen(screen) {
   return renderTyping(screen);
 }
 
-// Is the example sentence shown on this screen? Always on the intro card; elsewhere only with the
-// setting on, or after "Toon zin" (which stays on for the word's answer side).
-const sentenceShown = (screen) => !screen || sessionSettings.showSentence || !!screen.showSentence;
+// Is the example sentence shown on this screen? Always on the intro card and for words of a context
+// set (naar → zu / nach: the sentence decides which one); elsewhere only with the setting on, or
+// after "Toon zin" (which stays on for the word's answer side).
+const sentenceShown = (screen) => !screen || sessionSettings.showSentence || !!screen.showSentence || !!screen.word?.contextSet;
 
 // The card frame: context sentence, the word at a fixed position, then whatever follows.
 // When the sentence is hidden, a small "Toon zin" button takes its place, in the same fixed-height
@@ -302,9 +405,11 @@ function exampleLine(word, withSentence) {
     withSentence && ` — ${word.example.nl}`);
 }
 
-function wordDetails(word, screen = null) {
+// The rule of a context set shows on the intro and after a mistake (not after every right answer).
+function wordDetails(word, screen = null, { sibling = false, rule = true } = {}) {
   return [
     exampleLine(word, sentenceShown(screen)),
+    rule && ruleNote(word, { highlight: sibling }),
     deHetNote(word),
     falseFriendNote(word),
     relatedNote(word.base != null ? session?.wordsById.get(word.base) : null),
@@ -388,8 +493,7 @@ function renderTyping(screen, { message = null } = {}) {
     say(word);
     renderReveal(screen, r, typed);
   } }, input, h('button', { class: 'primary', type: 'submit' }, T.check));
-  const label = screen.step === 'tooEasy' ? (screen.item.check ? T.checkLabel(levelOf(word)) : T.tooEasyPrompt)
-    : screen.step === 'relearn' ? T.relearn : '';
+  const label = screen.step === 'tooEasy' ? T.tooEasyPrompt : screen.step === 'relearn' ? T.relearn : '';
   show(
     sessionHeader(),
     card({
@@ -418,7 +522,8 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
       : r.outcome === 'almost' ? T.almost
         : r.reason === 'article' ? T.wrongArticle
           : r.reason === 'umlaut' ? T.wrongUmlaut
-            : r.outcome === 'wrongReal' ? T.wrongReal : T.wrong;
+            : r.sibling ? T.wrongSibling(r.sibling)
+              : r.outcome === 'wrongReal' ? T.wrongReal : T.wrong;
   const target = r.target;
   const shownAnswer = r.outcome === 'almost' && !overridden
     ? h('p', { class: 'answer-line' }, T.youTyped, ': ', h('span', { class: 'typed' }, typed), ' → ',
@@ -454,7 +559,8 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
         overridden && h('p', { class: 'message', id: 'overridden', role: 'status' }, T.overridden(overridden)),
         shownAnswer,
         r.note && !overridden && h('p', { class: 'note-line' }, T.spelling(r.note)),
-        ...wordDetails(word, screen),
+        skipLevelOffer(screen, ok),
+        ...wordDetails(word, screen, { sibling: !!r.sibling && !overridden, rule: !ok }),
       ],
     }),
     !ok && h('p', { class: 'small muted retype-label' }, T.retype),
@@ -472,6 +578,28 @@ function renderReveal(screen, r, typed, { overridden = null } = {}) {
   input.focus();
 }
 
+// After a passed Te makkelijk: when the last 5 new words of this level were all known, offer to
+// skip the rest of the level (§6.1). Its words then come in the quick scan on Home.
+function skipLevelOffer(screen, ok) {
+  const T = S.session;
+  const n = levelOf(screen.word);
+  if (screen.step !== 'tooEasy' || !ok || !session.levelLooksEasy(n)) return null;
+  const box = h('div', { class: 'note', id: 'skipLevelBox' },
+    h('p', { class: 'small' }, T.skipLevelHint(n)),
+    h('button', {
+      id: 'skipLevel', type: 'button',
+      onpointerdown: (e) => e.preventDefault(), // keep the keyboard up
+      onclick: () => {
+        const easyLevels = session.skipLevel(n);
+        sessionSettings.easyLevels = easyLevels;
+        db.setSetting('easyLevels', easyLevels).catch((e) => toast(S.error(e.message)));
+        box.replaceChildren(h('p', { class: 'small', role: 'status' }, T.skippedLevel(n)));
+        document.getElementById('answer')?.focus();
+      },
+    }, T.skipLevel(n)));
+  return box;
+}
+
 function answerInput() {
   return h('input', {
     type: 'text', id: 'answer', 'aria-label': S.session.answerLabel, placeholder: S.session.placeholder,
@@ -481,13 +609,12 @@ function answerInput() {
 
 function renderDone() {
   const T = S.session;
-  const { done, ms, newWords, checks } = session.stats;
+  const { done, ms, newWords } = session.stats;
   hideKeyRow();
   show(
     h('h1', {}, T.doneTitle),
     h('p', { class: 'big', id: 'doneStats' }, T.doneStats(done, Math.max(done ? 1 : 0, Math.round(ms / 60000)))),
     newWords > 0 && h('p', { class: 'muted' }, T.doneNew(newWords)),
-    checks > 0 && h('p', { class: 'muted' }, T.doneChecks(checks)),
     h('div', { class: 'bottom' }, h('button', { class: 'primary', id: 'back', onclick: endSession }, T.back)),
   );
 }
@@ -582,7 +709,18 @@ async function renderSettings() {
     ),
     h('h2', {}, T.levels),
     h('p', { class: 'small muted' }, T.levelsHint),
-    h('div', { class: 'list', id: 'levels' }, levelList.map((l) => h('div', { class: 'row' },
+    h('div', { class: 'list' }, h('div', { class: 'row' },
+      h('label', { for: 'startLevel' }, T.startLevel, h('span', { class: 'hint' }, T.startLevelHint)),
+      h('select', {
+        id: 'startLevel',
+        onchange: async (e) => {
+          await db.setSetting('easyLevels', levelsBelow(levelList, e.target.value));
+          renderSettings();
+        },
+      },
+      startLevelOf(levelList, s.easyLevels) == null && h('option', { value: '', selected: true, disabled: true }, T.startLevelCustom),
+      START_LEVELS.map((c) => h('option', { value: c, selected: c === startLevelOf(levelList, s.easyLevels) }, T.startLevelOption(c)))))),
+    h('div', { class: 'list level-list', id: 'levels' }, levelList.map((l) => h('div', { class: 'row' },
       h('label', { for: `level${l.level}` }, T.levelRow(l), h('span', { class: 'hint' }, T.levelRowHint(l))),
       h('label', { class: 'level-toggle small muted' },
         T.levelEasy,

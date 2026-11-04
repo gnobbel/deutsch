@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import {
-  Session, WORD_FILES, pickNewWord, planToday, mcOptions, GAP, levels, currentLevel, levelOf, CHECKS_PER_DAY, LEVEL_SIZE,
+  Session, WORD_FILES, pickNewWord, planToday, mcOptions, GAP, levels, currentLevel, levelOf, SCANS_PER_DAY, LEVEL_SIZE,
+  scanBatch, applyScan, levelLooksEasy, levelsBelow, startLevelOf,
   difficultyOf, difficultyBand, HARD_PER_DAY,
 } from '../../session.js';
 import { Grade, State, newCard, rate, DEFAULT_SECONDS } from '../../srs.js';
@@ -238,10 +239,13 @@ test('multiple choice: 4 options, nouns with articles, one the same noun with a 
   }
 });
 
-// ---------- levels and quick checks (§6.1) ----------
+// ---------- levels and the quick scan (§6.1) ----------
 
 // 250 words: levels 1–3 (the last one half full). Word 2 and 3 are confusable (weekdays).
 const many = Array.from({ length: 250 }, (_, i) => W(i + 1, `wort${i + 1}`, `woord${i + 1}`, i === 1 || i === 2 ? { groups: ['weekdays'] } : {}));
+const planFor = (wordStates, settings = {}, cards = new Map()) => planToday({
+  words: many, wordStates, cards, settings: { ...DEFAULT_SETTINGS, ...settings }, seconds: DEFAULT_SECONDS, now: NOW,
+});
 
 test('levels: groups of 100 by rank, with how many words were seen', () => {
   assert.equal(LEVEL_SIZE, 100);
@@ -254,74 +258,94 @@ test('levels: groups of 100 by rank, with how many words were seen', () => {
   assert.equal(currentLevel(many, ws, [1, 2]), 3, 'levels marked too easy are skipped');
 });
 
-test('a level marked too easy: no new words from it; at most CHECKS_PER_DAY quick checks a day', () => {
-  const plan = planToday({ words: many, wordStates: new Map(), cards: new Map(), settings: { ...DEFAULT_SETTINGS, easyLevels: [1] }, seconds: DEFAULT_SECONDS, now: NOW });
+test('start level: marks every level before the first A2 (or B1) level, and is read back', () => {
+  const lv = [1, 2, 3, 4, 5].map((level, i) => ({ level, cefr: ['A1', 'A1', 'A2', 'A1', 'B1'][i] }));
+  assert.deepEqual(levelsBelow(lv, 'A1'), []);
+  assert.deepEqual(levelsBelow(lv, 'A2'), [1, 2]);
+  assert.deepEqual(levelsBelow(lv, 'B1'), [1, 2, 3, 4]);
+  assert.equal(startLevelOf(lv, []), 'A1');
+  assert.equal(startLevelOf(lv, [2, 1]), 'A2');
+  assert.equal(startLevelOf(lv, [1, 2, 3, 4]), 'B1');
+  assert.equal(startLevelOf(lv, [1]), null, 'a hand-picked set is nobody\'s start level');
+});
+
+test('a level marked too easy: no new words from it; at most SCANS_PER_DAY words to scan a day', () => {
+  const plan = planFor(new Map(), { easyLevels: [1] });
   assert.equal(plan.newLeft, 150);
-  assert.equal(plan.checksLeft, 100);
-  assert.equal(plan.checksToday, CHECKS_PER_DAY);
+  assert.equal(plan.scanLeft, 100);
+  assert.equal(plan.scanToday, SCANS_PER_DAY);
   assert.equal(pickNewWord(many, new Map(), new Map(), NOW, new Set([1])).id, 101);
-  const used = new Map(Array.from({ length: 25 }, (_, i) => [i + 1, { wordId: i + 1, introducedOn: NOW, levelCheck: true, tooEasy: true }]));
-  const later = planToday({ words: many, wordStates: used, cards: new Map(), settings: { ...DEFAULT_SETTINGS, easyLevels: [1] }, seconds: DEFAULT_SECONDS, now: NOW });
-  assert.equal(later.checksToday, CHECKS_PER_DAY - 25);
-  assert.equal(later.newToday, 10, 'passed checks do not count toward the new-word limit');
+  assert.deepEqual(scanBatch(many, new Map(), new Set([1])).map((w) => w.id), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });
 
-test('quick checks: no intro; right → Easy and done; wrong → learned normally, counted as a new word', async () => {
-  const { s, store } = session({ words: many, settings: { easyLevels: [1], newPerDay: 2 } });
-  const seen = await play(s, (sc) => (sc.step === 'tooEasy' && sc.word.id === 20 ? 'falsch' : null));
-  const checks = seen.filter((x) => x.step === 'tooEasy');
-  assert.equal(checks.length, CHECKS_PER_DAY);
-  assert.ok(checks.every((x) => x.id <= 100), 'checks come from level 1');
-  assert.ok(!seen.some((x) => x.step === 'intro' && x.id <= 100), 'no intro for a level-1 word');
-  assert.deepEqual(seen.slice(0, 5).map((x) => x.step), ['tooEasy', 'tooEasy', 'tooEasy', 'tooEasy', 'intro'], 'a new word after every 4 checks');
-  assert.equal(store.cards.get('1:production').fsrs.reps, 1);
-  assert.equal(store.log.find((r) => r.cardId === '1:production').grade, Grade.Easy);
-  assert.equal(store.words.get(1).tooEasy, true);
-  // The missed check went through the learning steps and counts as a word learned today.
-  assert.deepEqual(seen.filter((x) => x.id === 20).map((x) => x.step), ['tooEasy', 'mc', 'type1', 'type2']);
-  assert.equal(store.words.get(20).checkMissed, true);
-  assert.deepEqual(seen.filter((x) => x.step === 'intro').map((x) => x.id), [101, 102]);
-  const plan = planToday({ words: many, wordStates: store.words, cards: store.cards, settings: { ...DEFAULT_SETTINGS, easyLevels: [1], newPerDay: 2 }, seconds: DEFAULT_SECONDS, now: NOW });
-  assert.equal(plan.usedToday, 3);
-  assert.equal(plan.checksToday, 0);
+test('the scan: known words go to review (Easy), unknown ones become the next new words', async () => {
+  const easy = new Set([1]);
+  const page = scanBatch(many, new Map(), easy);
+  const missed = page.filter((w) => w.id === 4 || w.id === 7);
+  const known = page.filter((w) => !missed.includes(w));
+  const out = applyScan({ known, missed, wordStates: new Map(), now: NOW });
+  assert.equal(out.cards.length, 8);
+  const c1 = out.cards.find((c) => c.wordId === 1);
+  assert.deepEqual([c1.step, c1.fsrs.state, c1.fsrs.reps], [null, State.Review, 1]);
+  assert.ok(c1.fsrs.due > NOW);
+  const ws = new Map(out.wordStates.map((w) => [w.wordId, w]));
+  assert.deepEqual(
+    (({ levelCheck, tooEasy, scanMissed }) => ({ levelCheck, tooEasy, scanMissed }))(ws.get(1)),
+    { levelCheck: true, tooEasy: true, scanMissed: false },
+  );
+  assert.equal(ws.get(4).introducedOn, undefined);
+  assert.deepEqual([ws.get(4).scanMissed, ws.get(4).queuedNext], [true, true]);
+
+  // The next page starts after the scanned words; today's budget shrinks by 10.
+  assert.equal(scanBatch(many, ws, easy)[0].id, 11);
+  const cards = new Map(out.cards.map((c) => [c.id, c]));
+  const plan = planFor(ws, { easyLevels: [1] }, cards);
+  assert.equal(plan.scanToday, SCANS_PER_DAY - 10);
+  assert.equal(plan.scanLeft, 90);
+  assert.equal(plan.newLeft, 152, 'the two unknown words are new words again');
+  assert.equal(plan.usedToday, 0, 'known words do not count toward the daily limit');
+
+  // A session introduces the unknown words first, as normal new words with an intro.
+  const { s } = session({ words: many, wordStates: out.wordStates, cards: out.cards, settings: { easyLevels: [1], newPerDay: 3 } });
+  const seen = await play(s);
+  assert.deepEqual(seen.filter((x) => x.step === 'intro').map((x) => x.id), [4, 7, 101]);
 });
 
-test('a missed quick check takes a new-word place while there is one left', async () => {
-  const { s } = session({ words: many, settings: { easyLevels: [1], newPerDay: 1 } });
-  const seen = await play(s, (sc) => (sc.step === 'tooEasy' && sc.word.id === 1 ? 'falsch' : null));
-  assert.ok(!seen.some((x) => x.step === 'intro'), 'no real new word: the missed check used the place');
-});
+test('"Dit niveau lijkt te makkelijk": the last 5 new words of a level all passed Te makkelijk', async () => {
+  const intro = (ids, tooEasy) => ids.map((id, i) => [id, { wordId: id, introducedOn: new Date(NOW.getTime() + id * 1000 + i), tooEasy }]);
+  const five = new Map(intro([1, 2, 3, 4, 5], true));
+  assert.equal(levelLooksEasy(1, many, five), true);
+  assert.equal(levelLooksEasy(1, many, five, [1]), false, 'not for a level already marked');
+  assert.equal(levelLooksEasy(1, many, new Map(intro([1, 2, 3, 4], true))), false, 'four is not enough');
+  assert.equal(levelLooksEasy(1, many, new Map([...intro([1], false), ...intro([2, 3, 4, 5, 6], true)])), true, 'only the last five count');
+  assert.equal(levelLooksEasy(1, many, new Map([...intro([2, 3, 4, 5], true), ...intro([6], false)])), false);
+  assert.equal(levelLooksEasy(2, many, five), false, 'evidence from another level does not count');
 
-test('quick checks: a passed one does not block its confusable set; a missed one does', async () => {
-  const { s } = session({ words: many, settings: { easyLevels: [1], newPerDay: 0 } });
-  const passed = await play(s);
-  assert.deepEqual(passed.slice(0, 3).map((x) => x.id), [1, 2, 3], 'word 3 right after word 2');
-  const { s: s2 } = session({ words: many, settings: { easyLevels: [1], newPerDay: 0 } });
-  const missed = await play(s2, (sc) => (sc.step === 'tooEasy' && sc.word.id === 2 ? 'falsch' : null));
-  const at = (id, step) => missed.findIndex((x) => x.id === id && x.step === step);
-  assert.ok(at(3, 'tooEasy') > at(2, 'type2'), 'word 3 waits until word 2 has been learned');
-});
-
-test('a quick check that was cut off comes back as a check, not as an intro', () => {
-  const t = new Date('2026-10-28T10:00:00+01:00');
-  const card = { ...newCard(5, 'production', t), step: 'tooEasy' };
-  const ws = { wordId: 5, introducedOn: t, tooEasy: false, levelCheck: true, accepted: [] };
-  const { s } = session({ words: many, cards: [card], wordStates: [ws], settings: { easyLevels: [1] } });
-  const first = s.next();
-  assert.deepEqual([first.word.id, first.step, first.item.check], [5, 'tooEasy', true]);
-});
-
-test('"Ik had gelijk" on a missed quick check gives the new-word place back', async () => {
-  const { s, store } = session({ words: many, settings: { easyLevels: [1], newPerDay: 1 } });
-  const sc = s.next();
-  assert.equal(sc.step, 'tooEasy');
-  s.answerTyped(sc, 'prima', 1000);
-  assert.equal(s.newRemaining, 0);
-  s.override();
-  assert.equal(s.newRemaining, 1);
+  // In a session: offered after the fifth passed Te makkelijk; skipping the level makes the next
+  // new words come from level 2.
+  const { s, store } = session({ words: many, settings: { newPerDay: 7 } });
+  let offeredAfter = null;
+  const intros = [];
+  for (let i = 0; i < 40; i++) {
+    const sc = s.next();
+    if (!sc) break;
+    if (sc.step === 'intro') {
+      intros.push(sc.word.id);
+      s.answerIntro(sc, 'tooEasy', 1000);
+      continue;
+    }
+    s.answerTyped(sc, displayForm(sc.word), 1000);
+    if (offeredAfter == null && s.levelLooksEasy(levelOf(sc.word))) {
+      offeredAfter = sc.word.id;
+      assert.deepEqual(s.skipLevel(1), [1]);
+    }
+  }
   await s.flush();
-  assert.equal(store.words.get(sc.word.id).tooEasy, true);
-  assert.equal(store.cards.get(`${sc.word.id}:production`).step, null);
+  // (Word 3 waits a day: it is in the same confusable set as word 2.)
+  assert.deepEqual(intros.slice(0, 5), [1, 2, 4, 5, 6]);
+  assert.equal(offeredAfter, 6, 'offered once five words were known');
+  assert.deepEqual(intros.slice(5, 7), [101, 102], 'the next new words come from level 2');
+  assert.equal(store.words.get(1).tooEasy, true);
 });
 
 // ---------- difficulty and word families (§6.1) ----------
@@ -369,4 +393,21 @@ test('the real word data: every base exists, and the order puts it first', () =>
     assert.ok(byId.has(w.base), `${w.de}: base ${w.base}`);
     assert.ok(byId.get(w.base).rank < w.rank, `${w.de} after ${byId.get(w.base).de}`);
   }
+});
+
+// ---------- context sets (§4.2 contextSet) ----------
+
+test('context sets: siblings are the multiple-choice options and are not introduced on the same day', () => {
+  const words = [
+    W(1, 'zu', 'naar', { pos: 'prep', contextSet: 'naar', rule: 'r' }),
+    W(2, 'nach', 'naar', { pos: 'prep', contextSet: 'naar', rule: 'r' }),
+    ...Array.from({ length: 20 }, (_, i) => W(i + 3, `vor${i}`, `voorz${i}`, { pos: 'prep' })),
+  ];
+  const { options } = mcOptions(words[0], words, () => 0.5);
+  assert.ok(options.includes('nach'), 'the sibling is an option');
+  assert.ok(options.includes('zu'));
+  assert.equal(options.length, 4);
+  const ws = new Map([[1, { wordId: 1, introducedOn: NOW, tooEasy: false }]]);
+  const cards = new Map([['1:production', { ...newCard(1, 'production', NOW), step: 'mc' }]]);
+  assert.equal(pickNewWord(words, ws, cards, NOW).id, 3, 'nach waits while zu is in learning');
 });

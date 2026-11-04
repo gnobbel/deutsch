@@ -63,6 +63,14 @@ export function validateWords(entries, { range = null, seenIds = new Set(), seen
     if (!isBool(w.cognate)) err('cognate must be true/false');
     if (!isBool(w.check)) err('check must be true/false');
     if (w.clozeOnly !== undefined && !isBool(w.clozeOnly)) err('clozeOnly must be true/false');
+    // Context sets (§4.2): words with the same Dutch prompt where the sentence decides. The
+    // sentence is their prompt, so no hint and no first letter; the rule is shown after answering.
+    if (w.contextSet !== undefined) {
+      if (!/^[a-z']+$/.test(w.contextSet ?? '')) err('contextSet must be a short lowercase label');
+      if (!isStr(w.rule)) err('a contextSet word needs a rule');
+      if (w.nlHint !== undefined) err('a contextSet word has no nlHint (its sentence is the prompt)');
+      if (w.showInitial) err('a contextSet word has showInitial: false (its sentence is the prompt)');
+    } else if (w.rule !== undefined) err('rule only goes with contextSet');
     if (w.falseFriend !== null) {
       if (!w.falseFriend || !isStr(w.falseFriend.nl) || !isStr(w.falseFriend.note)) err('falseFriend must be null or {nl, note}');
       if (w.cognate !== false) err('false friends must have cognate: false');
@@ -124,7 +132,8 @@ export function validateWords(entries, { range = null, seenIds = new Set(), seen
 }
 
 // Checks across all files: every `base` exists and comes earlier; no two words show the same
-// prompt (the sentence is hidden by default, so `nlHint` must tell them apart).
+// prompt (the sentence is hidden by default, so `nlHint` must tell them apart), except words in
+// the same context set; each context set shares one Dutch prompt and one rule.
 export function validateAll(all) {
   const errors = [];
   const byId = new Map(all.map((w) => [w.id, w]));
@@ -144,12 +153,21 @@ export function validateAll(all) {
     if (k && sentences.has(k)) errors.push(`#${w.id} ${w.de}: same example sentence as ${sentences.get(k).de}`);
     else if (k) sentences.set(k, w);
   }
+  // Two words in the same context set may share the Dutch word: their sentence is the prompt.
   const prompts = new Map();
   for (const w of all) {
     if (w.clozeOnly) continue;
     const k = promptKey(w);
-    if (prompts.has(k)) errors.push(`#${w.id} ${w.de}: same prompt as ${prompts.get(k).de} (${k.replaceAll('|', ' ').trim()}); give them different nlHints`);
-    else prompts.set(k, w);
+    const clash = (prompts.get(k) || []).find((o) => !(w.contextSet && o.contextSet === w.contextSet));
+    if (clash) errors.push(`#${w.id} ${w.de}: same prompt as ${clash.de} (${k.replaceAll('|', ' ').trim()}); give them different nlHints`);
+    prompts.set(k, [...(prompts.get(k) || []), w]);
+  }
+  const sets = new Map();
+  for (const w of all) if (w.contextSet !== undefined && !w.clozeOnly) sets.set(w.contextSet, [...(sets.get(w.contextSet) || []), w]);
+  for (const [name, ws] of sets) {
+    if (ws.length < 2) errors.push(`contextSet ${name}: needs at least two learnable words`);
+    if (new Set(ws.map((w) => w.nl[0])).size > 1) errors.push(`contextSet ${name}: every word needs the same Dutch prompt (first nl)`);
+    if (new Set(ws.map((w) => w.rule)).size > 1) errors.push(`contextSet ${name}: every word needs the same rule`);
   }
   return errors;
 }

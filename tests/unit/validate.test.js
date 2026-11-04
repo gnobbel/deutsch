@@ -127,3 +127,23 @@ test('every example sentence is unique', () => {
   const b = { ...handy(), id: 300, rank: 300, de: 'Smartphone', nl: ['smartphone'] };
   assert.match(validateAll([handy(), b]).join(), /same example sentence as Handy/);
 });
+
+test('context sets: same prompt allowed inside a set, with one shared rule; no hint or first letter', () => {
+  const prep = (id, de, ex, o = {}) => ({
+    id, rank: id, freq: id, level: 'A1', pos: 'prep', de, nl: ['naar'], nlArticle: null,
+    example: { de: ex, nl: `zin ${id}` }, acceptAlso: [], showInitial: false, falseFriend: null, cognate: true, groups: [], check: false,
+    contextSet: 'naar', rule: 'r', ...o,
+  });
+  const zu = prep(1, 'zu', 'Ich gehe [[zu]] Anna.');
+  const nach = prep(2, 'nach', 'Ich fahre [[nach]] Berlin.');
+  assert.deepEqual([...validateWords([zu, nach]), ...validateAll([zu, nach])], []);
+  // Outside a set the same prompt still needs a hint.
+  const other = prep(3, 'hin', 'Ich gehe [[hin]].', { contextSet: undefined, rule: undefined });
+  assert.match(validateAll([zu, nach, other]).join('\n'), /same prompt/);
+  assert.match(validateAll([zu, prep(2, 'nach', 'Ich fahre [[nach]] Berlin.', { rule: 'anders' })]).join('\n'), /same rule/);
+  assert.match(validateAll([zu]).join('\n'), /at least two/);
+  assert.match(errs([prep(1, 'zu', 'Ich gehe [[zu]] Anna.', { rule: undefined })]), /needs a rule/);
+  assert.match(errs([prep(1, 'zu', 'Ich gehe [[zu]] Anna.', { nlHint: 'x' })]), /no nlHint/);
+  assert.match(errs([prep(1, 'zu', 'Ich gehe [[zu]] Anna.', { showInitial: true })]), /showInitial: false/);
+  assert.match(errs([prep(1, 'zu', 'Ich gehe [[zu]] Anna.', { contextSet: undefined })]), /rule only goes with contextSet/);
+});

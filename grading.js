@@ -91,6 +91,13 @@ export function buildIndex(words) {
   return { byNl, realForms };
 }
 
+// The other words of a word's context set (PLAN §4.2 `contextSet`): same Dutch prompt, and the
+// sentence decides which one is meant.
+export function contextSiblings(word, index) {
+  if (!word.contextSet) return [];
+  return (index?.byNl.get(normalize(word.nl[0])) || []).filter((w) => w.id !== word.id && w.contextSet === word.contextSet);
+}
+
 function splitArticle(s) {
   const m = s.match(/^(der|die|das)\s+(.+)$/i);
   return m ? { article: m[1].toLocaleLowerCase('de-DE'), rest: m[2] } : { article: null, rest: s };
@@ -98,8 +105,9 @@ function splitArticle(s) {
 
 // Grades a typed answer on a production card (Dutch prompt → German word), §7.2.
 // opts: { index, ignoreCase, umlautShortcuts, accepted: [answers allowed via "Ik had gelijk"] }
-// Returns { outcome: 'correct'|'different'|'wrongReal'|'almost'|'wrong', note, canOverride, reason, target }.
-// note: the proper spelling after an umlaut shortcut; reason: 'article' | 'umlaut' | null.
+// Returns { outcome: 'correct'|'different'|'wrongReal'|'almost'|'wrong', note, canOverride, reason, target, sibling? }.
+// note: the proper spelling after an umlaut shortcut; reason: 'article' | 'umlaut' | null;
+// sibling: the other context-set word that was typed (shown with the set's rule).
 export function grade(rawInput, word, opts = {}) {
   const { index, ignoreCase = true, umlautShortcuts = true, accepted = [] } = opts;
   const norm = (s) => normalize(s, { ignoreCase });
@@ -116,9 +124,16 @@ export function grade(rawInput, word, opts = {}) {
   }
   if (accepted.some((a) => norm(a) === input)) return result('correct');
 
+  // Another word of the same context set (naar → zu / nach): the sentence decides, so it is a
+  // real mistake, shown with the set's rule (§7.2).
+  const siblings = contextSiblings(word, index);
+  const sibling = siblings.find((w) => [...answerForms(w), ...(w.pos === 'noun' ? [w.de, ...ARTICLES.map((a) => `${a} ${w.de}`)] : [])]
+    .some((f) => matchForm(input, norm(f), { shortcut: umlautShortcuts })));
+  if (sibling) return result('wrongReal', { canOverride: true, sibling: displayForm(sibling) });
+
   // A different valid German word for this Dutch prompt: no grade, try again.
   const others = [...(word.acceptAlso || [])];
-  for (const w of index?.byNl.get(normalize(word.nl[0])) || []) if (w.id !== word.id) others.push(...answerForms(w));
+  for (const w of index?.byNl.get(normalize(word.nl[0])) || []) if (w.id !== word.id && !siblings.includes(w)) others.push(...answerForms(w));
   if (others.some((o) => matchForm(input, norm(o), { shortcut: umlautShortcuts }))) return result('different');
 
   const isNoun = word.pos === 'noun';

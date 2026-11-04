@@ -158,3 +158,26 @@ test('edit distance counts a swap as one edit', () => {
 test('diffParts marks the differing letters of the target', () => {
   assert.deepEqual(diffParts('das Hndy', 'das Handy'), ['das H', 'a', 'ndy']);
 });
+
+test('context sets: the other word of the set is wrong (with the rule), not "different"', () => {
+  const set = [
+    W({ id: 101, pos: 'prep', de: 'zu', nl: ['naar'], contextSet: 'naar', rule: 'r' }),
+    W({ id: 102, pos: 'prep', de: 'nach', nl: ['naar', 'na'], contextSet: 'naar', rule: 'r' }),
+    W({ id: 103, pos: 'noun', de: 'Uhr', article: 'die', plural: 'Uhren', nl: ['uur'], contextSet: 'uur', rule: 'u' }),
+    W({ id: 104, pos: 'noun', de: 'Stunde', article: 'die', plural: 'Stunden', nl: ['uur'], contextSet: 'uur', rule: 'u' }),
+    W({ id: 105, pos: 'adj', de: 'mooi1', nl: ['naar'] }), // shares the prompt but is not in the set
+  ];
+  const idx = buildIndex(set);
+  const [zu, nach, uhr] = set;
+  assert.deepEqual(
+    (({ outcome, sibling, canOverride }) => ({ outcome, sibling, canOverride }))(grade('nach', zu, { index: idx })),
+    { outcome: 'wrongReal', sibling: 'nach', canOverride: true },
+  );
+  assert.equal(grade('zu', nach, { index: idx }).sibling, 'zu');
+  assert.equal(grade('zu', zu, { index: idx }).outcome, 'correct');
+  // A noun sibling counts with any article or none.
+  assert.equal(grade('die Stunde', uhr, { index: idx }).sibling, 'die Stunde');
+  assert.equal(grade('Stunde', uhr, { index: idx }).sibling, 'die Stunde');
+  // A word outside the set with the same prompt is still a "different valid word".
+  assert.equal(grade('mooi1', zu, { index: idx }).outcome, 'different');
+});

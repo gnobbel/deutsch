@@ -2,11 +2,12 @@
 // grading.js) day by day and prints reviews, minutes and retention per week.
 //   node tools/simulate.js [--days 90] [--new 10] [--skip 0.14] [--seed 1] [--retention 0.9] [--penalty 0.04] [--easy 2]
 // --penalty: how much worse than FSRS's prediction the learner recalls (0 = exactly as predicted).
-// --easy N: levels 1–N are marked "te makkelijk" at the start, so their words come as quick checks.
+// --easy N: levels 1–N are marked "te makkelijk" at the start, so their words come in the quick
+// scan (up to SCANS_PER_DAY a day, before the session).
 process.env.TZ ||= 'Europe/Amsterdam';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Session, WORD_FILES, difficultyBand } from '../session.js';
+import { Session, WORD_FILES, difficultyBand, planToday, scanBatch, applyScan, SCAN_PAGE } from '../session.js';
 import { retrievability, secondsPerCard, DEFAULT_SECONDS, dayKey } from '../srs.js';
 import { displayForm } from '../grading.js';
 import { DEFAULT_SETTINGS } from '../db.js';
@@ -27,7 +28,10 @@ export function rng(seed) {
 // noisier than the model), and a little worse again for words that are hard for a Dutch speaker
 // (difficultyOf in session.js); typos now and then; time per card from typical typing speed.
 const LEARNER = {
-  tooEasy: 0.05, tooEasyRight: 0.7, checkRight: 0.9, mcRight: 0.95, typo: 0.06, relearnRight: 0.9,
+  tooEasy: 0.05, tooEasyRight: 0.7, mcRight: 0.95, typo: 0.06, relearnRight: 0.9,
+  // The scan: how many words of an easy level he marks as known, and how many of those he
+  // actually can't type yet (wrong article, spelling): their first review fails more often.
+  scanKnown: 0.9, scanOverconfident: 0.15, overconfidentRight: 0.3, scanMsPerWord: 2500,
   learnRight: { easy: 0.9, medium: 0.85, hard: 0.75 },
   penalty: 0.04,
   hardPenalty: 0.04, // extra, on reviews of hard words
@@ -47,6 +51,7 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
     addReport: () => {},
   };
   const settings = { ...DEFAULT_SETTINGS, newPerDay, retention, easyLevels };
+  const overconfident = new Set(); // marked known in the scan, but not really known yet
   const start = new Date(2026, 10, 2, 19, 0);
   const out = [];
   for (let d = 0; d < days; d++) {
@@ -57,11 +62,32 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
     }
     let clock = t0.getTime();
     const now = () => new Date(clock);
+    // The quick scan first (Home → "Snel doorlopen"), up to today's budget.
+    let scanned = 0;
+    let scanMs = 0;
+    if (easyLevels.length) {
+      const seconds = secondsPerCard(store.log.slice(-3000));
+      let budget = planToday({ words, wordStates: store.words, cards: store.cards, settings, seconds, now: now() }).scanToday;
+      while (budget > 0) {
+        const page = scanBatch(words, store.words, new Set(easyLevels), Math.min(SCAN_PAGE, budget));
+        if (!page.length) break;
+        const missed = page.filter(() => random() > LEARNER.scanKnown);
+        const known = page.filter((w) => !missed.includes(w));
+        for (const w of known) if (random() < LEARNER.scanOverconfident) overconfident.add(w.id);
+        const res = applyScan({ known, missed, wordStates: store.words, now: now(), retention });
+        res.wordStates.forEach(memory.putWord);
+        res.cards.forEach(memory.putCard);
+        budget -= page.length;
+        scanned += page.length;
+        scanMs += page.length * LEARNER.scanMsPerWord;
+        clock += page.length * LEARNER.scanMsPerWord;
+      }
+    }
     const s = new Session({
       words, wordStates: [...store.words.values()], cards: [...store.cards.values()], settings,
       seconds: secondsPerCard(store.log.slice(-3000)), store: memory, now, random,
     });
-    const stat = { day: d + 1, skipped: false, reviews: 0, correct: 0, lapses: 0, newWords: 0, ms: 0, paused: s.paused, dueAtStart: s.reviews.length };
+    const stat = { day: d + 1, skipped: false, reviews: 0, correct: 0, lapses: 0, newWords: 0, ms: scanMs, scanned, paused: s.paused, dueAtStart: s.reviews.length };
     for (let guard = 0; guard < 5000; guard++) {
       const sc = s.next();
       if (!sc) break;
@@ -77,9 +103,10 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
       } else {
         let p;
         const band = difficultyBand(word);
-        if (sc.step === 'review') p = Math.max(0, retrievability(sc.card, now(), retention) - penalty - (band === 'hard' ? LEARNER.hardPenalty : 0));
+        if (sc.step === 'review' && overconfident.delete(word.id)) p = LEARNER.overconfidentRight;
+        else if (sc.step === 'review') p = Math.max(0, retrievability(sc.card, now(), retention) - penalty - (band === 'hard' ? LEARNER.hardPenalty : 0));
         else if (sc.step === 'relearn') p = LEARNER.relearnRight;
-        else if (sc.step === 'tooEasy') p = sc.item.check ? LEARNER.checkRight : LEARNER.tooEasyRight;
+        else if (sc.step === 'tooEasy') p = LEARNER.tooEasyRight;
         else p = LEARNER.learnRight[band];
         const right = random() < p;
         const slip = right && random() < LEARNER.typo;
@@ -98,7 +125,6 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
     }
     await s.flush();
     stat.newWords = s.stats.newWords;
-    stat.checks = s.stats.checks;
     out.push(stat);
   }
   const learned = [...store.cards.values()].filter((c) => c.step == null).length;
@@ -110,15 +136,15 @@ export async function simulate({ days = 90, newPerDay = 10, skip = 1 / 7, seed =
 export function report(result, { words: wordCount, retention = 0.9, penalty = LEARNER.penalty }) {
   const lines = [];
   const pad = (v, n) => String(v).padStart(n);
-  const withChecks = result.days.some((d) => d.checks);
-  lines.push(`week  days  new/day${withChecks ? '  checks/day' : ''}  reviews/day  minutes/day  max min  retention`);
+  const withScan = result.days.some((d) => d.scanned);
+  lines.push(`week  days  new/day${withScan ? '  scanned/day' : ''}  reviews/day  minutes/day  max min  retention`);
   for (let w = 0; w * 7 < result.days.length; w++) {
     const week = result.days.slice(w * 7, w * 7 + 7);
     const done = week.filter((d) => !d.skipped);
     const avg = (f) => (done.length ? done.reduce((s, d) => s + f(d), 0) / done.length : 0);
     const reviews = done.reduce((s, d) => s + d.reviews, 0);
     const correct = done.reduce((s, d) => s + d.correct, 0);
-    lines.push(`${pad(w + 1, 4)}  ${pad(done.length, 4)}  ${pad(avg((d) => d.newWords).toFixed(1), 7)}${withChecks ? `  ${pad(avg((d) => d.checks).toFixed(1), 10)}` : ''}  ${pad(avg((d) => d.reviews).toFixed(0), 11)}  ${pad(avg((d) => d.ms / 60000).toFixed(0), 11)}  ${pad(Math.max(0, ...done.map((d) => d.ms / 60000)).toFixed(0), 7)}  ${reviews ? `${(100 * correct / reviews).toFixed(0)}%` : '-'}`);
+    lines.push(`${pad(w + 1, 4)}  ${pad(done.length, 4)}  ${pad(avg((d) => d.newWords).toFixed(1), 7)}${withScan ? `  ${pad(avg((d) => d.scanned).toFixed(1), 11)}` : ''}  ${pad(avg((d) => d.reviews).toFixed(0), 11)}  ${pad(avg((d) => d.ms / 60000).toFixed(0), 11)}  ${pad(Math.max(0, ...done.map((d) => d.ms / 60000)).toFixed(0), 7)}  ${reviews ? `${(100 * correct / reviews).toFixed(0)}%` : '-'}`);
   }
   const all = result.days.filter((d) => !d.skipped);
   const reviews = all.reduce((s, d) => s + d.reviews, 0);
@@ -150,11 +176,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const newPerDay = arg('new', 10);
   // Enough words for the whole run: the real ones first, then stand-ins for the bands to come.
   const words = [...real];
-  for (let i = 1; words.filter((w) => !w.clozeOnly).length < days * newPerDay * 1.2; i++) {
+  // (Levels marked too easy are scanned, not learned, so they need stand-ins of their own.)
+  const easy = arg('easy', 0);
+  for (let i = 1; words.filter((w) => !w.clozeOnly).length < days * newPerDay * 1.2 + easy * 100; i++) {
     // Stand-ins get a realistic mix of difficulty: every third one is not a cognate.
     words.push({ id: 100000 + i, rank: 10000 + i, pos: 'adj', de: `wort${i}`, nl: [`woord${i}`], acceptAlso: [], groups: [], showInitial: false, cognate: i % 3 !== 0, falseFriend: null });
   }
-  const easy = arg('easy', 0);
   const easyLevels = Array.from({ length: easy }, (_, i) => i + 1);
   const result = await simulate({ days, newPerDay, skip: arg('skip', 1 / 7), seed: arg('seed', 1), retention: arg('retention', 0.9), penalty: arg('penalty', LEARNER.penalty), easyLevels, words });
   console.log(`Simulation: ${days} days, ${newPerDay} new words a day, about 1 day in 7 skipped, desired retention ${arg('retention', 0.9)}, learner ${arg('penalty', LEARNER.penalty)} below FSRS's prediction${easy ? `, levels 1–${easy} marked too easy` : ''}`);

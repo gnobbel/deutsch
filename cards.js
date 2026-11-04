@@ -84,7 +84,8 @@ export function dutchSentence(word) {
     let len = n.length;
     if (i < 0 && !n.includes(' ') && n.length >= 4) {
       // An inflected form: a word in the sentence starting with the stem (werken → werkt).
-      const stem = n.replace(/(en|e|n)$/, '');
+      // A doubled consonant before -en is single in the stem: zetten → zet, bellen → bel.
+      const stem = n.replace(/(en|e|n)$/, '').replace(/([^aeiou])\1$/, '$1');
       const m = new RegExp(`(^|[^\\p{L}])(${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\p{L}*)`, 'u').exec(low);
       if (m && stem.length >= 3) { i = m.index + m[1].length; len = m[2].length; }
     }
@@ -99,6 +100,15 @@ export function deHetNote(word) {
   const mismatch = (word.nlArticle === 'het' && word.article !== 'das') || (word.nlArticle === 'de' && word.article === 'das');
   if (!mismatch) return null;
   return h('p', { class: 'note-line' }, S.session.deHet(`${word.nlArticle} ${word.nl[0]}`, `${word.article} ${word.de}`));
+}
+
+// The rule of a context set (naar → zu / nach), after answering and on the intro: one line per
+// case. Highlighted after the other word of the set was typed.
+export function ruleNote(word, { highlight = false } = {}) {
+  if (!word.rule) return null;
+  return h('div', { class: `rule${highlight ? ' note' : ''}`, id: 'rule' },
+    h('p', { class: 'note-line' }, h('b', {}, S.session.rule)),
+    h('ul', {}, word.rule.split(' · ').map((line) => h('li', {}, line))));
 }
 
 export function falseFriendNote(word) {
