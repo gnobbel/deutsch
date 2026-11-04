@@ -304,6 +304,7 @@ test('the scan: known words go to review (Easy), unknown ones become the next ne
   assert.equal(plan.scanLeft, 90);
   assert.equal(plan.newLeft, 152, 'the two unknown words are new words again');
   assert.equal(plan.usedToday, 0, 'known words do not count toward the daily limit');
+  assert.equal(currentLevel(many, ws, [1]), 2, 'unknown words from a skipped level do not move the current level back');
 
   // A session introduces the unknown words first, as normal new words with an intro.
   const { s } = session({ words: many, wordStates: out.wordStates, cards: out.cards, settings: { easyLevels: [1], newPerDay: 3 } });
@@ -410,4 +411,18 @@ test('context sets: siblings are the multiple-choice options and are not introdu
   const ws = new Map([[1, { wordId: 1, introducedOn: NOW, tooEasy: false }]]);
   const cards = new Map([['1:production', { ...newCard(1, 'production', NOW), step: 'mc' }]]);
   assert.equal(pickNewWord(words, ws, cards, NOW).id, 3, 'nach waits while zu is in learning');
+});
+
+test('context sets: a "different" answer gives no first letter (the sentence is the help)', () => {
+  const words = [
+    W(1, 'nur', 'maar', { pos: 'adv', contextSet: 'maar', rule: 'r' }),
+    W(2, 'aber', 'maar', { pos: 'conj', contextSet: 'maar', rule: 'r' }),
+    W(3, 'bloß', 'maar', { pos: 'adv', clozeOnly: true }),
+  ];
+  const card = { ...newCard(1, 'production', NOW), step: 'type1' };
+  const { s } = session({ words, cards: [card], wordStates: [{ wordId: 1, introducedOn: NOW, tooEasy: false, accepted: [] }] });
+  const sc = s.next();
+  assert.equal(s.answerTyped(sc, 'bloß').outcome, 'different');
+  assert.equal(sc.hint, null);
+  assert.equal(s.answerTyped(sc, 'aber').sibling, 'aber');
 });

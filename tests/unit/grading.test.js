@@ -171,7 +171,7 @@ test('context sets: the other word of the set is wrong (with the rule), not "dif
   const [zu, nach, uhr] = set;
   assert.deepEqual(
     (({ outcome, sibling, canOverride }) => ({ outcome, sibling, canOverride }))(grade('nach', zu, { index: idx })),
-    { outcome: 'wrongReal', sibling: 'nach', canOverride: true },
+    { outcome: 'wrongReal', sibling: 'nach', canOverride: false },
   );
   assert.equal(grade('zu', nach, { index: idx }).sibling, 'zu');
   assert.equal(grade('zu', zu, { index: idx }).outcome, 'correct');
@@ -180,4 +180,14 @@ test('context sets: the other word of the set is wrong (with the rule), not "dif
   assert.equal(grade('Stunde', uhr, { index: idx }).sibling, 'die Stunde');
   // A word outside the set with the same prompt is still a "different valid word".
   assert.equal(grade('mooi1', zu, { index: idx }).outcome, 'different');
+});
+
+test('context sets: an acceptAlso that is also a sibling is a different valid word, not a mistake', () => {
+  const set = [
+    W({ id: 201, pos: 'prep', de: 'seit', nl: ['sinds'], contextSet: 'sinds', rule: 'r' }),
+    W({ id: 202, pos: 'conj', de: 'seitdem', nl: ['sinds'], contextSet: 'sinds', rule: 'r', acceptAlso: ['seit'] }),
+  ];
+  const idx = buildIndex(set);
+  assert.equal(grade('seit', set[1], { index: idx }).outcome, 'different');
+  assert.equal(grade('seitdem', set[0], { index: idx }).sibling, 'seitdem');
 });

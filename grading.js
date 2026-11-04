@@ -124,17 +124,22 @@ export function grade(rawInput, word, opts = {}) {
   }
   if (accepted.some((a) => norm(a) === input)) return result('correct');
 
-  // Another word of the same context set (naar → zu / nach): the sentence decides, so it is a
-  // real mistake, shown with the set's rule (§7.2).
-  const siblings = contextSiblings(word, index);
-  const sibling = siblings.find((w) => [...answerForms(w), ...(w.pos === 'noun' ? [w.de, ...ARTICLES.map((a) => `${a} ${w.de}`)] : [])]
-    .some((f) => matchForm(input, norm(f), { shortcut: umlautShortcuts })));
-  if (sibling) return result('wrongReal', { canOverride: true, sibling: displayForm(sibling) });
+  // A listed alternative (acceptAlso) is a different valid word: no grade, try again. It comes
+  // before the context-set check: "seit" is also right where "seitdem" is asked.
+  const matches = (o) => matchForm(input, norm(o), { shortcut: umlautShortcuts });
+  if ((word.acceptAlso || []).some(matches)) return result('different');
 
-  // A different valid German word for this Dutch prompt: no grade, try again.
-  const others = [...(word.acceptAlso || [])];
+  // Another word of the same context set (naar → zu / nach): the sentence decides, so it is a
+  // real mistake, shown with the set's rule (§7.2). "Ik had gelijk" isn't offered: telling the
+  // words of a set apart is exactly what these cards teach (§7.5).
+  const siblings = contextSiblings(word, index);
+  const sibling = siblings.find((w) => [...answerForms(w), ...(w.pos === 'noun' ? [w.de, ...ARTICLES.map((a) => `${a} ${w.de}`)] : [])].some(matches));
+  if (sibling) return result('wrongReal', { sibling: displayForm(sibling) });
+
+  // Another word with this Dutch prompt: a different valid word, no grade, try again.
+  const others = [];
   for (const w of index?.byNl.get(normalize(word.nl[0])) || []) if (w.id !== word.id && !siblings.includes(w)) others.push(...answerForms(w));
-  if (others.some((o) => matchForm(input, norm(o), { shortcut: umlautShortcuts }))) return result('different');
+  if (others.some(matches)) return result('different');
 
   const isNoun = word.pos === 'noun';
   const { article, rest } = splitArticle(input);

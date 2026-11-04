@@ -339,7 +339,8 @@ test('words with the same Dutch word where grammar decides: the sentence is the 
   await page.locator('#answer').fill('nach');
   await page.locator('#answer').press('Enter');
   await expect(page.locator('.card .label')).toHaveText('In deze zin past nach niet');
-  await expect(page.locator('#rule')).toContainText('naar een persoon of plek → zu');
+  await expect(page.locator('#rule')).toContainText('→ zu (zum Arzt, zur Schule)');
+  await expect(page.locator('#override')).toHaveCount(0); // no "Ik had gelijk" for the other word of the set
   await expect(page.locator('#rule')).toContainText('naar een stad of land → nach');
   await page.screenshot({ path: 'test-results/screens/session-context-wrong.png' });
   await expect(page.locator('.card .context')).toHaveText(zu.example.de.replace(/\[\[|\]\]/g, ''));

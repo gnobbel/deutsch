@@ -52,10 +52,11 @@ export function levels(words, wordStates, easyLevels = []) {
   }));
 }
 
-// The level new words come from now: that of the first word still to be introduced.
+// The level new words come from now: that of the first word still to be introduced outside the
+// levels marked too easy (words the scan sent back from those levels don't move it back).
 export function currentLevel(words, wordStates, easyLevels = []) {
   const easy = new Set(easyLevels);
-  const next = [...words].sort((a, b) => a.rank - b.rank).find((w) => isNewCandidate(w, wordStates.get(w.id), easy));
+  const next = [...words].sort((a, b) => a.rank - b.rank).find((w) => !easy.has(levelOf(w)) && isNewCandidate(w, wordStates.get(w.id), easy));
   return next ? levelOf(next) : null;
 }
 
@@ -462,7 +463,8 @@ export class Session {
     const { item } = screen;
     if (result.outcome === 'different') {
       this.log(screen, ms, { answer: input, outcome: 'different' });
-      screen.hint = screen.word.de[0];
+      // The first letter helps, except for a context set: there the sentence is the help (§4.2).
+      if (!screen.word.contextSet) screen.hint = screen.word.de[0];
       screen.retried = true;
       return { ...result, rated: null };
     }

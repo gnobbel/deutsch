@@ -262,6 +262,7 @@ function renderScanPage() {
       class: 'primary', id: 'scanNext',
       onclick: async (e) => {
         e.target.disabled = true;
+        const current = scan;
         const missed = page.filter((w) => unknown.has(w));
         const known = page.filter((w) => !unknown.has(w));
         const out = applyScan({ known, missed, wordStates: scan.wordStates, now: new Date(), retention: scan.retention });
@@ -271,6 +272,7 @@ function renderScanPage() {
           e.target.disabled = false;
           return toast(S.error(err.message));
         }
+        if (scan !== current) return route(); // stopped while saving: Home redraws with the saved page
         for (const w of out.wordStates) scan.wordStates.set(w.wordId, w);
         scan.done += page.length;
         scan.known += known.length;
