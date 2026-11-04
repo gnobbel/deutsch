@@ -192,6 +192,18 @@ export function grade(rawInput, word, opts = {}) {
   return result('wrong', { canOverride: articleOk, reason: articleOk ? null : 'article' });
 }
 
+// The hint after a different valid word (§7.2): the start of the target up to the first letter
+// where the typed word differs (warum after wieso → "wa"), so it tells them apart even when both
+// start with the same letter; never the whole word.
+export function retryHint(word, rawInput) {
+  const core = (x) => normalize(x).replace(/^(der|die|das|sich) /, '');
+  const a = core(rawInput);
+  const b = core(word.de);
+  let k = 0;
+  while (k < a.length && k < b.length && a[k] === b[k]) k++;
+  return word.de.slice(0, Math.max(1, Math.min(k + 1, word.de.length - 1)));
+}
+
 // The overall FSRS grade for a production answer: Good, Hard (only from Almost) or Again.
 export function gradeToRating(outcome) {
   if (outcome === 'correct') return 3;

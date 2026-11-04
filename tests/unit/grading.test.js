@@ -1,7 +1,7 @@
 // PLAN §7.6: every listed example, plus the "Ik had gelijk" safeguards (§7.5).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { grade, gradePlural, gradeVerbForms, buildIndex, normalize, editDistance, diffParts } from '../../grading.js';
+import { grade, gradePlural, gradeVerbForms, buildIndex, normalize, editDistance, diffParts, retryHint } from '../../grading.js';
 
 const W = (o) => ({ acceptAlso: [], groups: [], nlArticle: null, ...o });
 const words = [
@@ -226,4 +226,12 @@ test('the plural or a conjugated form: said so, and no "Ik had gelijk"', () => {
     assert.deepEqual([r.outcome, r.reason, r.canOverride], ['wrongReal', 'form', false], f);
   }
   assert.equal(g('fängt an', 'anfangen').reason, 'form');
+});
+
+test('the hint after a different valid word shows where the two words part', () => {
+  assert.equal(retryHint(W({ de: 'warum' }), 'wieso'), 'wa');
+  assert.equal(retryHint(W({ de: 'ein bisschen' }), 'ein wenig'), 'ein b');
+  assert.equal(retryHint(W({ de: 'Abendessen', pos: 'noun', article: 'das' }), 'das Abendbrot'), 'Abende');
+  assert.equal(retryHint(W({ de: 'bekommen' }), 'kriegen'), 'b', 'a different first letter: just that');
+  assert.equal(retryHint(W({ de: 'nie' }), 'niemals'), 'ni', 'never the whole word');
 });

@@ -2,7 +2,7 @@
 // and relearning. Pure logic: the screens come from cards.js, persistence goes through `store`.
 // session.js decides only *when within a session* a card comes back; srs.js (FSRS) decides its
 // schedule, with one rating at graduation, at Te makkelijk, or at a review answer.
-import { grade, gradeToRating, displayForm, normalize, buildIndex } from './grading.js';
+import { grade, gradeToRating, displayForm, normalize, buildIndex, retryHint } from './grading.js';
 import {
   Grade, CARD_TYPES, newCard, rate, isDue, dayKey, retrievability, applySiblingsRule, newWordsPaused,
 } from './srs.js';
@@ -479,7 +479,7 @@ export class Session {
     if (result.outcome === 'different') {
       this.log(screen, ms, { answer: input, outcome: 'different' });
       // The first letter helps, except for a context set: there the sentence is the help (§4.2).
-      if (!screen.word.contextSet) screen.hint = screen.word.de[0];
+      if (!screen.word.contextSet) screen.hint = retryHint(screen.word, input);
       screen.retried = true;
       return { ...result, rated: null };
     }
